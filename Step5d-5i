@@ -1,0 +1,1660 @@
+///////////////////////////////////////////////////////////////
+// STEP 5D ALL-IN-ONE:
+// Build controlled GL order-6 transporter in clean 2+12+12 basis.
+//
+// We rebuild:
+//   G = F4(7) on V26
+//   g order 13 trace 0
+//   clean adapted basis V26 = 2 + 12 + 12
+//
+// Then construct f blockwise:
+//   fixed 2D block: diag(3,5), order 6, trace profile [1,-1,-2]
+//   each 12D block: Frobenius transporter C -> C^10
+//
+// Goal:
+//   fGL^-1 * g * fGL = g^10
+//   Order(fGL)=6
+//   Trace profile on V26 = [1,-1,-2]
+//
+// Warning:
+//   fGL is in GL26(7), not yet proved to lie in F4(7).
+///////////////////////////////////////////////////////////////
+
+SetSeed(2);
+
+F := GF(7);
+
+function SignedGF7(a)
+    a := F!a;
+    if a eq F!0 then
+        return 0;
+    elif a eq F!1 then
+        return 1;
+    elif a eq F!2 then
+        return 2;
+    elif a eq F!3 then
+        return 3;
+    elif a eq F!4 then
+        return -3;
+    elif a eq F!5 then
+        return -2;
+    elif a eq F!6 then
+        return -1;
+    end if;
+end function;
+
+function TraceProfile(M)
+    return [SignedGF7(Trace(M^i)) : i in [1..3]];
+end function;
+
+function DistinctMatrixCount(seq)
+    reps := [];
+    for X in seq do
+        seen := false;
+        for Y in reps do
+            if X eq Y then
+                seen := true;
+                break;
+            end if;
+        end for;
+        if not seen then
+            Append(~reps, X);
+        end if;
+    end for;
+    return #reps;
+end function;
+
+print "============================================================";
+print "STEP 5D ALL-IN-ONE: CONTROLLED GL ORDER-6 TRANSPORTER";
+print "============================================================";
+
+print "Building G := ChevalleyGroup(\"F\",4,GF(7))...";
+G := ChevalleyGroup("F", 4, F);
+
+print "Degree =", Degree(G);
+print "Base ring =", BaseRing(G);
+
+///////////////////////////////////////////////////////////////
+// Find g
+///////////////////////////////////////////////////////////////
+
+print "";
+print "Finding g of order 13 with Trace(g)=0...";
+
+foundG := false;
+maxTrialsG := 500;
+
+for trial in [1..maxTrialsG] do
+    y := Random(G);
+    oy := Order(y);
+
+    if oy mod 13 eq 0 then
+        gg := y^(oy div 13);
+
+        if Order(gg) eq 13 and Trace(gg) eq F!0 then
+            g := gg;
+            foundG := true;
+
+            print "SUCCESS: found g.";
+            print "Trial =", trial;
+            print "Original random element order =", oy;
+            print "Order(g) =", Order(g);
+            print "Trace(g) =", Trace(g);
+
+            break;
+        end if;
+    end if;
+end for;
+
+if not foundG then
+    error "No suitable g found.";
+end if;
+
+///////////////////////////////////////////////////////////////
+// Build clean adapted basis 2 + 12 + 12
+///////////////////////////////////////////////////////////////
+
+d := Degree(G);
+A := Matrix(g);
+Id26 := IdentityMatrix(F, d);
+V := VectorSpace(F, d);
+
+print "";
+print "Building clean 2+12+12 adapted basis...";
+
+Kfix := Nullspace(A - Id26);
+Wnon := RowSpace(A - Id26);
+
+fixBasis := Basis(Kfix);
+wBasis := Basis(Wnon);
+
+print "dim Fix(g) =", Dimension(Kfix);
+print "dim Wnon =", Dimension(Wnon);
+print "dim Fix + Wnon =", Dimension(sub< V | fixBasis cat wBasis >);
+
+if Dimension(Kfix) ne 2 or Dimension(Wnon) ne 24 then
+    error "Unexpected Fix/Wnon dimensions.";
+end if;
+
+function CyclicRows(v, A, len)
+    rows := [];
+    w := v;
+    for i in [0..len-1] do
+        Append(~rows, w);
+        w := w * A;
+    end for;
+    return rows;
+end function;
+
+currentRows := [fixBasis[i] : i in [1..#fixBasis]];
+currentSpace := sub< V | currentRows >;
+
+for blockNo in [1..2] do
+
+    foundBlock := false;
+
+    for trial in [1..1000] do
+        v := Random(Wnon);
+        cyc := CyclicRows(v, A, 12);
+        C := sub< V | cyc >;
+
+        if Dimension(C) eq 12 then
+            invariantC := (cyc[12] * A) in C;
+            testSpace := sub< V | currentRows cat cyc >;
+
+            if invariantC and Dimension(testSpace) eq Dimension(currentSpace) + 12 then
+                print "  Found 12D cyclic block", blockNo, "at trial", trial;
+
+                currentRows := currentRows cat cyc;
+                currentSpace := testSpace;
+
+                foundBlock := true;
+                break;
+            end if;
+        end if;
+    end for;
+
+    if not foundBlock then
+        error "Failed to find cyclic block.";
+    end if;
+end for;
+
+Trow := ZeroMatrix(F, 26, 26);
+
+for i in [1..26] do
+    for j in [1..26] do
+        Trow[i,j] := currentRows[i][j];
+    end for;
+end for;
+
+if Rank(Trow) ne 26 then
+    error "Trow is not invertible.";
+end if;
+
+Tadapt := Trow;
+Aadapt := Tadapt * A * Tadapt^-1;
+
+print "Rank(Tadapt) =", Rank(Tadapt);
+
+///////////////////////////////////////////////////////////////
+// Check clean block form
+///////////////////////////////////////////////////////////////
+
+Afix := Submatrix(Aadapt, 1, 1, 2, 2);
+A12a := Submatrix(Aadapt, 3, 3, 12, 12);
+A12b := Submatrix(Aadapt, 15, 15, 12, 12);
+
+cleanBlocks :=
+    Afix eq IdentityMatrix(F, 2) and
+    Submatrix(Aadapt, 1, 3, 2, 24) eq ZeroMatrix(F, 2, 24) and
+    Submatrix(Aadapt, 3, 1, 24, 2) eq ZeroMatrix(F, 24, 2) and
+    Submatrix(Aadapt, 3, 15, 12, 12) eq ZeroMatrix(F, 12, 12) and
+    Submatrix(Aadapt, 15, 3, 12, 12) eq ZeroMatrix(F, 12, 12);
+
+print "Clean block form?", cleanBlocks;
+print "Order fixed block =", Order(Afix);
+print "Order first 12 block =", Order(A12a);
+print "Order second 12 block =", Order(A12b);
+
+if not cleanBlocks then
+    error "Adapted basis is not clean.";
+end if;
+
+///////////////////////////////////////////////////////////////
+// Build Frobenius transporter on each 12D block
+///////////////////////////////////////////////////////////////
+
+function FrobeniusTransporterBlock(C, k)
+    // C is a 12x12 cyclic block for g.
+    // Return K satisfying:
+    //     C*K = K*C^k
+    //
+    // We choose e1*K = e1.
+    F := BaseRing(C);
+    n := Nrows(C);
+
+    entries := [];
+
+    for i in [1..n] do
+        Cp := C^(k*(i-1));
+        for j in [1..n] do
+            Append(~entries, Cp[1,j]);
+        end for;
+    end for;
+
+    return Matrix(F, n, n, entries);
+end function;
+
+print "";
+print "Constructing 12D Frobenius transporters for exponent k=10...";
+
+K12a := FrobeniusTransporterBlock(A12a, 10);
+K12b := FrobeniusTransporterBlock(A12b, 10);
+
+print "Check A12a*K12a = K12a*A12a^10 ?", A12a*K12a eq K12a*A12a^10;
+print "Check A12b*K12b = K12b*A12b^10 ?", A12b*K12b eq K12b*A12b^10;
+
+print "Order(K12a) =", Order(K12a);
+print "Order(K12b) =", Order(K12b);
+print "Trace profile K12a =", TraceProfile(K12a);
+print "Trace profile K12b =", TraceProfile(K12b);
+
+///////////////////////////////////////////////////////////////
+// Build 2D fixed block
+///////////////////////////////////////////////////////////////
+
+// In GF(7), 3 and 5 both have order 6.
+// diag(3,5) has trace profile:
+//   Tr = 3+5 = 8 = 1
+//   Tr square = 2+4 = 6 = -1
+//   Tr cube = 6+6 = 12 = 5 = -2
+
+F2 := Matrix(F, 2, 2, [F!3, F!0,
+                       F!0, F!5]);
+
+print "";
+print "Fixed 2D block F2:";
+print F2;
+print "Order(F2) =", Order(F2);
+print "Trace profile F2 =", TraceProfile(F2);
+
+///////////////////////////////////////////////////////////////
+// Block diagonal construction
+///////////////////////////////////////////////////////////////
+
+function BlockDiag3(F, B0, B1, B2)
+    n0 := Nrows(B0);
+    n1 := Nrows(B1);
+    n2 := Nrows(B2);
+    n := n0 + n1 + n2;
+
+    M := ZeroMatrix(F, n, n);
+
+    for i in [1..n0] do
+        for j in [1..n0] do
+            M[i,j] := B0[i,j];
+        end for;
+    end for;
+
+    for i in [1..n1] do
+        for j in [1..n1] do
+            M[n0+i,n0+j] := B1[i,j];
+        end for;
+    end for;
+
+    for i in [1..n2] do
+        for j in [1..n2] do
+            M[n0+n1+i,n0+n1+j] := B2[i,j];
+        end for;
+    end for;
+
+    return M;
+end function;
+
+Fadapt := BlockDiag3(F, F2, K12a, K12b);
+
+print "";
+print "Testing controlled Fadapt in adapted basis...";
+
+print "Aadapt*Fadapt = Fadapt*Aadapt^10 ?",
+    Aadapt*Fadapt eq Fadapt*Aadapt^10;
+
+print "Fadapt^-1*Aadapt*Fadapt = Aadapt^10 ?",
+    Fadapt^-1 * Aadapt * Fadapt eq Aadapt^10;
+
+print "Order(Fadapt) =", Order(Fadapt);
+print "Trace profile Fadapt =", TraceProfile(Fadapt);
+
+///////////////////////////////////////////////////////////////
+// Convert back to original coordinates
+///////////////////////////////////////////////////////////////
+
+fGL := Tadapt^-1 * Fadapt * Tadapt;
+
+print "";
+print "Testing fGL in original V26 coordinates...";
+
+print "A*fGL = fGL*A^10 ?", A*fGL eq fGL*A^10;
+print "fGL^-1*A*fGL = A^10 ?", fGL^-1 * A * fGL eq A^10;
+print "Order(fGL) =", Order(fGL);
+print "Trace profile fGL =", TraceProfile(fGL);
+
+///////////////////////////////////////////////////////////////
+// Normal form count for <g,fGL>
+///////////////////////////////////////////////////////////////
+
+normalForms := [];
+
+for i in [0..12] do
+    for j in [0..5] do
+        Append(~normalForms, A^i * fGL^j);
+    end for;
+end for;
+
+nfCount := DistinctMatrixCount(normalForms);
+
+print "";
+print "Normal form count for <g,fGL>:";
+print "# distinct A^i*fGL^j, 0<=i<13, 0<=j<6 =", nfCount;
+
+print "";
+print "STEP 5D SUMMARY:";
+
+if A*fGL eq fGL*A^10 and Order(fGL) eq 6 and TraceProfile(fGL) eq [1,-1,-2] and nfCount eq 78 then
+    print "SUCCESS: built controlled GL26 Walton local f.";
+    print "We have:";
+    print "  Order(g)=13";
+    print "  Order(fGL)=6";
+    print "  fGL^-1*g*fGL = g^10";
+    print "  Trace profile on V26 = [1,-1,-2]";
+    print "  Normal forms give |<g,fGL>| = 78";
+    print "";
+    print "Important: fGL is still only a GL26 matrix.";
+    print "Next step: test whether fGL is actually compatible with genuine F4(7) structure.";
+else
+    print "Not fully successful. Send output before continuing.";
+end if;
+///////////////////////////////////////////////////////////////
+// STEP 5E:
+// Test whether fGL preserves the genuine F4(7)-invariant
+// bilinear form on V26.
+//
+// Assumes Step 5D has just run and stored:
+//   G, A, fGL
+//
+// Goal:
+//   Compute the bilinear forms S satisfying:
+//       M*S*Transpose(M) = S
+//   for the genuine F4(7) generators M.
+//
+// Then test:
+//       fGL*S*Transpose(fGL) = S
+//
+// If false, fGL is not in genuine F4(7).
+// If true, fGL passes this necessary test, but it is still not
+// a full proof of F4 membership.
+///////////////////////////////////////////////////////////////
+
+print "";
+print "============================================================";
+print "STEP 5E: TEST fGL AGAINST F4-INVARIANT BILINEAR FORM";
+print "============================================================";
+
+if not assigned G then
+    error "G is not assigned. Run Step 5D first.";
+end if;
+
+if not assigned A then
+    error "A is not assigned. Run Step 5D first.";
+end if;
+
+if not assigned fGL then
+    error "fGL is not assigned. Run Step 5D first.";
+end if;
+
+F := GF(7);
+d := Degree(G);
+
+function MatFromVec_RowMajor(v, d, F)
+    s := Eltseq(v);
+    return Matrix(F, d, d, [s[(i-1)*d + j] : i in [1..d], j in [1..d]]);
+end function;
+
+function InvariantBilinearFormSpace(mats, F, d)
+    rows := [];
+
+    for M in mats do
+        for i in [1..d] do
+            for j in [1..d] do
+
+                row := [F!0 : n in [1..d*d]];
+
+                // Equation:
+                //   (M*S*Transpose(M))_{i,j} - S_{i,j} = 0
+                //
+                // Coefficient of S[a,b] is M[i,a]*M[j,b].
+                for a in [1..d] do
+                    for b in [1..d] do
+                        idx := (a-1)*d + b;
+                        row[idx] +:= M[i,a] * M[j,b];
+                    end for;
+                end for;
+
+                // subtract S[i,j]
+                idx0 := (i-1)*d + j;
+                row[idx0] -:= F!1;
+
+                Append(~rows, row);
+            end for;
+        end for;
+    end for;
+
+    L := Matrix(F, rows);
+
+    // Right nullspace convention, as in transporter fix.
+    return Nullspace(Transpose(L));
+end function;
+
+function ScalarMultipleInfo(X, Y, F)
+    // Return <true, lambda> if X = lambda*Y.
+    for lambda in F do
+        if X eq lambda * Y then
+            return true, lambda;
+        end if;
+    end for;
+
+    return false, F!0;
+end function;
+
+print "Degree =", d;
+print "Computing invariant bilinear forms for genuine F4 generators...";
+
+gens := [Matrix(G.i) : i in [1..Ngens(G)]];
+
+Kbil := InvariantBilinearFormSpace(gens, F, d);
+Bbil := Basis(Kbil);
+
+print "Dimension of invariant bilinear form space =", Dimension(Kbil);
+
+if Dimension(Kbil) eq 0 then
+    error "No invariant bilinear form found. Something is wrong.";
+end if;
+
+print "";
+print "Ranks of basis invariant forms:";
+
+bestRank := -1;
+bestIndex := 0;
+Sbest := ZeroMatrix(F, d, d);
+
+for r in [1..#Bbil] do
+    S := MatFromVec_RowMajor(Bbil[r], d, F);
+    rk := Rank(S);
+    print "  basis form", r, "rank =", rk;
+
+    if rk gt bestRank then
+        bestRank := rk;
+        bestIndex := r;
+        Sbest := S;
+    end if;
+end for;
+
+print "";
+print "Best basis form index =", bestIndex;
+print "Best rank =", bestRank;
+
+if bestRank lt d then
+    print "Best basis form is singular. Trying random combinations...";
+
+    for trial in [1..200] do
+        v := Kbil!0;
+
+        for i in [1..#Bbil] do
+            c := Random(F);
+            if c ne F!0 then
+                v +:= c * Bbil[i];
+            end if;
+        end for;
+
+        S := MatFromVec_RowMajor(v, d, F);
+        rk := Rank(S);
+
+        if rk gt bestRank then
+            bestRank := rk;
+            Sbest := S;
+            print "  improved rank at trial", trial, "rank =", rk;
+        end if;
+
+        if rk eq d then
+            break;
+        end if;
+    end for;
+end if;
+
+print "";
+print "Final selected invariant form rank =", Rank(Sbest);
+
+print "";
+print "Sanity check: genuine generators preserve Sbest exactly:";
+for i in [1..Ngens(G)] do
+    M := Matrix(G.i);
+    print "  Generator", i, "preserves Sbest?",
+        M*Sbest*Transpose(M) eq Sbest;
+end for;
+
+print "";
+print "Check g preserves Sbest:";
+print "  A*Sbest*Transpose(A) = Sbest ?",
+    A*Sbest*Transpose(A) eq Sbest;
+
+print "";
+print "Now test fGL:";
+
+Sf := fGL*Sbest*Transpose(fGL);
+
+exactPreserve := Sf eq Sbest;
+isScalar, lambda := ScalarMultipleInfo(Sf, Sbest, F);
+
+print "  fGL*Sbest*Transpose(fGL) = Sbest ?", exactPreserve;
+print "  fGL preserves Sbest up to scalar?", isScalar;
+print "  scalar lambda =", lambda;
+
+print "";
+print "STEP 5E SUMMARY:";
+
+if exactPreserve then
+    print "GOOD: fGL preserves the F4-invariant bilinear form exactly.";
+    print "This is only a necessary test, not full F4 membership.";
+    print "Next step: test stronger F4 minimal-module structure, likely cubic/Albert invariant.";
+elif isScalar then
+    print "PARTIAL: fGL preserves the form only up to scalar.";
+    print "This suggests fGL is in a conformal group, but probably not genuine F4(7).";
+    print "Next step: adjust the 2D fixed block or impose exact invariant constraints.";
+else
+    print "FAIL: fGL does not preserve the genuine F4-invariant bilinear form.";
+    print "Therefore this controlled GL f is not an element of genuine F4(7).";
+    print "Next step: rebuild the 2D fixed block / transporter with invariant-form constraints included.";
+end if;
+///////////////////////////////////////////////////////////////
+// STEP 5F:
+// Inspect the F4-invariant bilinear form in the clean 2+12+12
+// adapted basis.
+//
+// Assumes Step 5D and Step 5E have run, giving:
+//   G, A, Tadapt, Aadapt, Fadapt, fGL, K12a, K12b, Sbest
+//
+// Goal:
+//   Move Sbest into adapted coordinates:
+//       Sadapt = Tadapt*Sbest*Transpose(Tadapt)
+//
+//   Then inspect block ranks/zero patterns:
+//       2 | 12 | 12
+//
+//   Also test whether the failure of Fadapt preserving Sadapt
+//   comes from the fixed 2D block or from the 12D blocks.
+///////////////////////////////////////////////////////////////
+
+print "";
+print "============================================================";
+print "STEP 5F: INSPECT INVARIANT FORM IN 2+12+12 BASIS";
+print "============================================================";
+
+if not assigned Tadapt then
+    error "Tadapt is not assigned. Run Step 5D first.";
+end if;
+
+if not assigned Aadapt then
+    error "Aadapt is not assigned. Run Step 5D first.";
+end if;
+
+if not assigned Fadapt then
+    error "Fadapt is not assigned. Run Step 5D first.";
+end if;
+
+if not assigned K12a then
+    error "K12a is not assigned. Run Step 5D first.";
+end if;
+
+if not assigned K12b then
+    error "K12b is not assigned. Run Step 5D first.";
+end if;
+
+if not assigned Sbest then
+    error "Sbest is not assigned. Run Step 5E first.";
+end if;
+
+F := GF(7);
+
+function SignedGF7(a)
+    a := F!a;
+    if a eq F!0 then
+        return 0;
+    elif a eq F!1 then
+        return 1;
+    elif a eq F!2 then
+        return 2;
+    elif a eq F!3 then
+        return 3;
+    elif a eq F!4 then
+        return -3;
+    elif a eq F!5 then
+        return -2;
+    elif a eq F!6 then
+        return -1;
+    end if;
+end function;
+
+function TraceProfileSmall(M)
+    return [SignedGF7(Trace(M^i)) : i in [1..3]];
+end function;
+
+function BlockDiag3(F, B0, B1, B2)
+    n0 := Nrows(B0);
+    n1 := Nrows(B1);
+    n2 := Nrows(B2);
+    n := n0 + n1 + n2;
+
+    M := ZeroMatrix(F, n, n);
+
+    for i in [1..n0] do
+        for j in [1..n0] do
+            M[i,j] := B0[i,j];
+        end for;
+    end for;
+
+    for i in [1..n1] do
+        for j in [1..n1] do
+            M[n0+i,n0+j] := B1[i,j];
+        end for;
+    end for;
+
+    for i in [1..n2] do
+        for j in [1..n2] do
+            M[n0+n1+i,n0+n1+j] := B2[i,j];
+        end for;
+    end for;
+
+    return M;
+end function;
+
+procedure PrintBlockInfo(name, M)
+    print name, ": size", Nrows(M), "x", Ncols(M),
+          " rank =", Rank(M),
+          " zero? ", M eq ZeroMatrix(BaseRing(M), Nrows(M), Ncols(M));
+end procedure;
+
+///////////////////////////////////////////////////////////////
+// Move invariant form into adapted coordinates
+///////////////////////////////////////////////////////////////
+
+Sadapt := Tadapt * Sbest * Transpose(Tadapt);
+
+print "Rank(Sbest) =", Rank(Sbest);
+print "Rank(Sadapt) =", Rank(Sadapt);
+
+print "";
+print "Check Aadapt preserves Sadapt:";
+print "  Aadapt*Sadapt*Transpose(Aadapt) = Sadapt ?",
+    Aadapt*Sadapt*Transpose(Aadapt) eq Sadapt;
+
+print "";
+print "Check old Fadapt preserves Sadapt:";
+presOld := Fadapt*Sadapt*Transpose(Fadapt) eq Sadapt;
+print "  Fadapt*Sadapt*Transpose(Fadapt) = Sadapt ?", presOld;
+
+///////////////////////////////////////////////////////////////
+// Extract blocks of Sadapt
+///////////////////////////////////////////////////////////////
+
+S00 := Submatrix(Sadapt, 1, 1, 2, 2);
+S01 := Submatrix(Sadapt, 1, 3, 2, 12);
+S02 := Submatrix(Sadapt, 1, 15, 2, 12);
+
+S10 := Submatrix(Sadapt, 3, 1, 12, 2);
+S11 := Submatrix(Sadapt, 3, 3, 12, 12);
+S12 := Submatrix(Sadapt, 3, 15, 12, 12);
+
+S20 := Submatrix(Sadapt, 15, 1, 12, 2);
+S21 := Submatrix(Sadapt, 15, 3, 12, 12);
+S22 := Submatrix(Sadapt, 15, 15, 12, 12);
+
+print "";
+print "Block structure of Sadapt with partition 2 | 12 | 12:";
+
+PrintBlockInfo("S00 fixed-fixed", S00);
+PrintBlockInfo("S01 fixed-C1", S01);
+PrintBlockInfo("S02 fixed-C2", S02);
+PrintBlockInfo("S10 C1-fixed", S10);
+PrintBlockInfo("S11 C1-C1", S11);
+PrintBlockInfo("S12 C1-C2", S12);
+PrintBlockInfo("S20 C2-fixed", S20);
+PrintBlockInfo("S21 C2-C1", S21);
+PrintBlockInfo("S22 C2-C2", S22);
+
+print "";
+print "S00 fixed-fixed form:";
+print S00;
+
+///////////////////////////////////////////////////////////////
+// Locate failure blockwise for old Fadapt
+///////////////////////////////////////////////////////////////
+
+Delta := Fadapt*Sadapt*Transpose(Fadapt) - Sadapt;
+
+D00 := Submatrix(Delta, 1, 1, 2, 2);
+D01 := Submatrix(Delta, 1, 3, 2, 12);
+D02 := Submatrix(Delta, 1, 15, 2, 12);
+
+D10 := Submatrix(Delta, 3, 1, 12, 2);
+D11 := Submatrix(Delta, 3, 3, 12, 12);
+D12 := Submatrix(Delta, 3, 15, 12, 12);
+
+D20 := Submatrix(Delta, 15, 1, 12, 2);
+D21 := Submatrix(Delta, 15, 3, 12, 12);
+D22 := Submatrix(Delta, 15, 15, 12, 12);
+
+print "";
+print "Failure Delta = Fadapt*Sadapt*Transpose(Fadapt) - Sadapt:";
+
+PrintBlockInfo("D00 fixed-fixed", D00);
+PrintBlockInfo("D01 fixed-C1", D01);
+PrintBlockInfo("D02 fixed-C2", D02);
+PrintBlockInfo("D10 C1-fixed", D10);
+PrintBlockInfo("D11 C1-C1", D11);
+PrintBlockInfo("D12 C1-C2", D12);
+PrintBlockInfo("D20 C2-fixed", D20);
+PrintBlockInfo("D21 C2-C1", D21);
+PrintBlockInfo("D22 C2-C2", D22);
+
+///////////////////////////////////////////////////////////////
+// Try to repair only the 2D fixed block first.
+//
+// Search all invertible 2x2 matrices F0 over GF(7) such that:
+//   F0*S00*Transpose(F0) = S00
+//   Order(F0)=6
+//   Trace profile [1,-1,-2]
+//
+// Then test F0 with the same K12a,K12b.
+///////////////////////////////////////////////////////////////
+
+print "";
+print "Searching for better 2D fixed block preserving S00...";
+
+fixedCandidates := [];
+
+for a in F do
+for b in F do
+for c in F do
+for d in F do
+
+    F0 := Matrix(F, 2, 2, [a,b,c,d]);
+
+    if Rank(F0) eq 2 then
+        if F0*S00*Transpose(F0) eq S00 then
+            if Order(F0) eq 6 and TraceProfileSmall(F0) eq [1,-1,-2] then
+                Append(~fixedCandidates, F0);
+            end if;
+        end if;
+    end if;
+
+end for;
+end for;
+end for;
+end for;
+
+print "Number of good 2D fixed-block candidates =", #fixedCandidates;
+
+if #fixedCandidates gt 0 then
+    F0good := fixedCandidates[1];
+
+    print "";
+    print "First good F0:";
+    print F0good;
+    print "Order(F0good) =", Order(F0good);
+    print "Trace profile F0good =", TraceProfileSmall(F0good);
+    print "F0good preserves S00?",
+        F0good*S00*Transpose(F0good) eq S00;
+
+    Fadapt_fixed_repaired := BlockDiag3(F, F0good, K12a, K12b);
+
+    print "";
+    print "Testing repaired fixed block with old 12D blocks:";
+    print "  Aadapt*Fadapt_fixed_repaired = Fadapt_fixed_repaired*Aadapt^10 ?",
+        Aadapt*Fadapt_fixed_repaired eq Fadapt_fixed_repaired*Aadapt^10;
+
+    print "  Order(Fadapt_fixed_repaired) =",
+        Order(Fadapt_fixed_repaired);
+
+    print "  Trace profile repaired =",
+        TraceProfileSmall(Fadapt_fixed_repaired);
+
+    print "  Preserves Sadapt?",
+        Fadapt_fixed_repaired*Sadapt*Transpose(Fadapt_fixed_repaired) eq Sadapt;
+
+    Delta2 := Fadapt_fixed_repaired*Sadapt*Transpose(Fadapt_fixed_repaired) - Sadapt;
+
+    print "";
+    print "Rank of remaining total Delta after fixed-block repair =",
+        Rank(Delta2);
+
+else
+    print "No 2D fixed block with required order/trace preserves S00.";
+    print "Then the trace may need to be distributed differently, or the basis pairing is more constrained.";
+end if;
+
+print "";
+print "STEP 5F SUMMARY:";
+print "This step only diagnoses the bilinear-form obstruction.";
+print "Send the block ranks and fixed-block candidate result.";
+print "Then Step 5G will rebuild the 12D/24D transporter with form constraints.";
+///////////////////////////////////////////////////////////////
+// STEP 5G:
+// Search for a bilinear-form-preserving 24D transporter
+// on the 12+12 part.
+//
+// Assumes Step 5D, 5E, 5F have run and we have:
+//   Aadapt, Sadapt, Sbest, Tadapt
+//   A12a, A12b
+//   S00
+//
+// Goal:
+//   Build Y24 on 12+12 such that:
+//       A24 * Y24 = Y24 * A24^10
+//       Y24 * S24 * Transpose(Y24) = S24
+//       Trace profile on 24D = [0,0,0]
+//
+// Then combine with a good 2D fixed block F0.
+// Final target:
+//       Order(FadaptGood)=6
+//       Trace profile [1,-1,-2]
+//       preserves Sadapt
+///////////////////////////////////////////////////////////////
+
+print "";
+print "============================================================";
+print "STEP 5G: FORM-PRESERVING 24D TRANSPORTER SEARCH";
+print "============================================================";
+
+if not assigned Aadapt then
+    error "Aadapt is not assigned. Run Step 5D first.";
+end if;
+
+if not assigned Sadapt then
+    error "Sadapt is not assigned. Run Step 5F first.";
+end if;
+
+if not assigned Tadapt then
+    error "Tadapt is not assigned. Run Step 5D first.";
+end if;
+
+if not assigned Sbest then
+    error "Sbest is not assigned. Run Step 5E first.";
+end if;
+
+F := GF(7);
+
+function SignedGF7(a)
+    a := F!a;
+    if a eq F!0 then
+        return 0;
+    elif a eq F!1 then
+        return 1;
+    elif a eq F!2 then
+        return 2;
+    elif a eq F!3 then
+        return 3;
+    elif a eq F!4 then
+        return -3;
+    elif a eq F!5 then
+        return -2;
+    elif a eq F!6 then
+        return -1;
+    end if;
+end function;
+
+function TraceProfile(M)
+    return [SignedGF7(Trace(M^i)) : i in [1..3]];
+end function;
+
+function BlockDiag2(F, B1, B2)
+    n1 := Nrows(B1);
+    n2 := Nrows(B2);
+    M := ZeroMatrix(F, n1+n2, n1+n2);
+
+    for i in [1..n1] do
+        for j in [1..n1] do
+            M[i,j] := B1[i,j];
+        end for;
+    end for;
+
+    for i in [1..n2] do
+        for j in [1..n2] do
+            M[n1+i,n1+j] := B2[i,j];
+        end for;
+    end for;
+
+    return M;
+end function;
+
+function BlockDiag3(F, B0, B1, B2)
+    n0 := Nrows(B0);
+    n1 := Nrows(B1);
+    n2 := Nrows(B2);
+    M := ZeroMatrix(F, n0+n1+n2, n0+n1+n2);
+
+    for i in [1..n0] do
+        for j in [1..n0] do
+            M[i,j] := B0[i,j];
+        end for;
+    end for;
+
+    for i in [1..n1] do
+        for j in [1..n1] do
+            M[n0+i,n0+j] := B1[i,j];
+        end for;
+    end for;
+
+    for i in [1..n2] do
+        for j in [1..n2] do
+            M[n0+n1+i,n0+n1+j] := B2[i,j];
+        end for;
+    end for;
+
+    return M;
+end function;
+
+function Block2x2(F, B11, B12, B21, B22)
+    n := Nrows(B11);
+    M := ZeroMatrix(F, 2*n, 2*n);
+
+    for i in [1..n] do
+        for j in [1..n] do
+            M[i,j] := B11[i,j];
+            M[i,n+j] := B12[i,j];
+            M[n+i,j] := B21[i,j];
+            M[n+i,n+j] := B22[i,j];
+        end for;
+    end for;
+
+    return M;
+end function;
+
+///////////////////////////////////////////////////////////////
+// Transporter space for C*X = X*D^10
+///////////////////////////////////////////////////////////////
+
+function BuildEquationMatrix(C, B)
+    F := BaseRing(C);
+    n := Nrows(C);
+    rows := [];
+
+    for i in [1..n] do
+        for j in [1..n] do
+            row := [F!0 : k in [1..n*n]];
+
+            for a in [1..n] do
+                idx := (a-1)*n + j;
+                row[idx] +:= C[i,a];
+            end for;
+
+            for b in [1..n] do
+                idx := (i-1)*n + b;
+                row[idx] -:= B[b,j];
+            end for;
+
+            Append(~rows, row);
+        end for;
+    end for;
+
+    return Matrix(F, rows);
+end function;
+
+function MatFromVec_ColMajor(v, n, F)
+    s := Eltseq(v);
+    return Matrix(F, n, n, [s[(j-1)*n + i] : i in [1..n], j in [1..n]]);
+end function;
+
+function TransporterSpace(C, D)
+    // Solve C*X = X*D^10
+    B := D^10;
+    L := BuildEquationMatrix(C, B);
+
+    // Same convention fixed in Step 4B:
+    // Nullspace(Transpose(L)) + column-major.
+    return Nullspace(Transpose(L));
+end function;
+
+function FindInvertibleTransporter(C, D, label)
+    F := BaseRing(C);
+    n := Nrows(C);
+
+    K := TransporterSpace(C, D);
+    bas := Basis(K);
+
+    print "";
+    print "Transporter", label;
+    print "  dimension =", Dimension(K);
+
+    // Try basis vectors first
+    for r in [1..#bas] do
+        X := MatFromVec_ColMajor(bas[r], n, F);
+        if C*X eq X*D^10 and Rank(X) eq n then
+            print "  found invertible basis transporter at basis", r;
+            return X;
+        end if;
+    end for;
+
+    // Try random linear combinations
+    for trial in [1..500] do
+        v := K!0;
+
+        for r in [1..#bas] do
+            c := Random(F);
+            if c ne F!0 then
+                v +:= c*bas[r];
+            end if;
+        end for;
+
+        X := MatFromVec_ColMajor(v, n, F);
+
+        if C*X eq X*D^10 and Rank(X) eq n then
+            print "  found invertible random transporter at trial", trial;
+            return X;
+        end if;
+    end for;
+
+    error "Failed to find invertible transporter for " cat label;
+end function;
+
+///////////////////////////////////////////////////////////////
+// Extract 12+12 data
+///////////////////////////////////////////////////////////////
+
+A12a := Submatrix(Aadapt, 3, 3, 12, 12);
+A12b := Submatrix(Aadapt, 15, 15, 12, 12);
+
+A24 := BlockDiag2(F, A12a, A12b);
+S24 := Submatrix(Sadapt, 3, 3, 24, 24);
+S00 := Submatrix(Sadapt, 1, 1, 2, 2);
+
+print "Rank(S24) =", Rank(S24);
+print "A24 preserves S24?",
+    A24*S24*Transpose(A24) eq S24;
+
+///////////////////////////////////////////////////////////////
+// Build four canonical 12x12 transporters
+///////////////////////////////////////////////////////////////
+
+Taa := FindInvertibleTransporter(A12a, A12a, "C1 -> C1^10");
+Tab := FindInvertibleTransporter(A12a, A12b, "C1 -> C2^10");
+Tba := FindInvertibleTransporter(A12b, A12a, "C2 -> C1^10");
+Tbb := FindInvertibleTransporter(A12b, A12b, "C2 -> C2^10");
+
+print "";
+print "Sanity checks for four transporters:";
+print "  A12a*Taa = Taa*A12a^10 ?", A12a*Taa eq Taa*A12a^10;
+print "  A12a*Tab = Tab*A12b^10 ?", A12a*Tab eq Tab*A12b^10;
+print "  A12b*Tba = Tba*A12a^10 ?", A12b*Tba eq Tba*A12a^10;
+print "  A12b*Tbb = Tbb*A12b^10 ?", A12b*Tbb eq Tbb*A12b^10;
+
+///////////////////////////////////////////////////////////////
+// Good 2D fixed blocks preserving S00
+///////////////////////////////////////////////////////////////
+
+fixedCandidates := [];
+
+for a in F do
+for b in F do
+for c in F do
+for d in F do
+
+    F0 := Matrix(F, 2, 2, [a,b,c,d]);
+
+    if Rank(F0) eq 2 then
+        if F0*S00*Transpose(F0) eq S00 then
+            if Order(F0) eq 6 and TraceProfile(F0) eq [1,-1,-2] then
+                Append(~fixedCandidates, F0);
+            end if;
+        end if;
+    end if;
+
+end for;
+end for;
+end for;
+end for;
+
+print "";
+print "Number of good fixed 2D candidates =", #fixedCandidates;
+
+///////////////////////////////////////////////////////////////
+// Scalar 2x2 mixing search on the two 12D copies
+///////////////////////////////////////////////////////////////
+
+print "";
+print "Searching scalar 2x2 mixing on the 12+12 part...";
+
+good24 := [];
+tested := 0;
+rank24 := 0;
+form24 := 0;
+order24 := 0;
+trace24 := 0;
+
+for a in F do
+for b in F do
+for c in F do
+for d in F do
+
+    Y24 := Block2x2(F, a*Taa, b*Tab, c*Tba, d*Tbb);
+    tested +:= 1;
+
+    if A24*Y24 eq Y24*A24^10 then
+
+        if Rank(Y24) eq 24 then
+            rank24 +:= 1;
+
+            if Y24*S24*Transpose(Y24) eq S24 then
+                form24 +:= 1;
+
+                ordY := Order(Y24);
+                profY := TraceProfile(Y24);
+
+                if ordY eq 6 then
+                    order24 +:= 1;
+                end if;
+
+                if profY eq [0,0,0] then
+                    trace24 +:= 1;
+                end if;
+
+                if ordY eq 6 and profY eq [0,0,0] then
+                    Append(~good24, Y24);
+
+                    print "";
+                    print "Found good 24D scalar-mixing transporter.";
+                    print "  coefficients [a,b,c,d] =", [a,b,c,d];
+                    print "  Order(Y24) =", ordY;
+                    print "  Trace profile Y24 =", profY;
+
+                    break a;
+                end if;
+            end if;
+        end if;
+    else
+        error "Scalar block did not satisfy transporter equation; this should not happen.";
+    end if;
+
+end for;
+end for;
+end for;
+end for;
+
+print "";
+print "24D scalar-mixing search summary:";
+print "  tested =", tested;
+print "  invertible rank-24 =", rank24;
+print "  preserves S24 =", form24;
+print "  preserves S24 and order 6 =", order24;
+print "  preserves S24 and trace [0,0,0] =", trace24;
+print "  good24 count =", #good24;
+
+///////////////////////////////////////////////////////////////
+// Combine with fixed block
+///////////////////////////////////////////////////////////////
+
+goodFull := false;
+
+if #good24 gt 0 and #fixedCandidates gt 0 then
+
+    for F0 in fixedCandidates do
+
+        Y24 := good24[1];
+
+        FadaptGood := BlockDiag2(F, F0, Y24);
+
+        okTransporter := Aadapt*FadaptGood eq FadaptGood*Aadapt^10;
+        okForm := FadaptGood*Sadapt*Transpose(FadaptGood) eq Sadapt;
+        okOrder := Order(FadaptGood) eq 6;
+        okTrace := TraceProfile(FadaptGood) eq [1,-1,-2];
+
+        print "";
+        print "Testing full FadaptGood:";
+        print "  transporter equation?", okTransporter;
+        print "  preserves Sadapt?", okForm;
+        print "  Order =", Order(FadaptGood);
+        print "  Trace profile =", TraceProfile(FadaptGood);
+
+        if okTransporter and okForm and okOrder and okTrace then
+
+            fFormGL := Tadapt^-1 * FadaptGood * Tadapt;
+
+            print "";
+            print "SUCCESS: full bilinear-form-compatible GL f found.";
+            print "Testing in original coordinates:";
+            print "  fFormGL^-1*A*fFormGL = A^10 ?",
+                fFormGL^-1*A*fFormGL eq A^10;
+            print "  fFormGL preserves Sbest?",
+                fFormGL*Sbest*Transpose(fFormGL) eq Sbest;
+            print "  Order(fFormGL) =", Order(fFormGL);
+            print "  Trace profile fFormGL =", TraceProfile(fFormGL);
+
+            goodFull := true;
+            break;
+        end if;
+    end for;
+end if;
+
+print "";
+print "STEP 5G SUMMARY:";
+
+if goodFull then
+    print "SUCCESS: found an order-6 transporter preserving the bilinear form.";
+    print "This is stronger than Step 5D, but still not full F4 membership.";
+    print "Next step: test stronger F4 minimal-module invariant.";
+else
+    print "No full solution found in scalar 2x2 mixing.";
+    print "This does NOT prove no genuine f exists.";
+    print "It only means the 24D solution needs the full transporter/isometry search.";
+    print "Next step should solve inside the full 48-dimensional 24D transporter space.";
+end if;
+///////////////////////////////////////////////////////////////
+// STEP 5H:
+// Full 48-dimensional 24D transporter/isometry random search.
+//
+// Assumes Step 5D, 5E, 5F, 5G have run and stored:
+//   Aadapt, Sadapt, Tadapt, Sbest, A
+//
+// Goal:
+//   Search Y24 in the full transporter space:
+//
+//       A24 * Y24 = Y24 * A24^10
+//
+//   with:
+//       Y24 * S24 * Transpose(Y24) = S24
+//       Order(Y24) = 6
+//       Trace profile Y24 = [0,0,0]
+//
+// Then combine with a good fixed 2D block F0 preserving S00.
+///////////////////////////////////////////////////////////////
+
+print "";
+print "============================================================";
+print "STEP 5H: FULL 48D 24D TRANSPORTER / ISOMETRY SEARCH";
+print "============================================================";
+
+if not assigned Aadapt then
+    error "Aadapt is not assigned. Run Step 5D first.";
+end if;
+
+if not assigned Sadapt then
+    error "Sadapt is not assigned. Run Step 5F first.";
+end if;
+
+if not assigned Tadapt then
+    error "Tadapt is not assigned. Run Step 5D first.";
+end if;
+
+if not assigned Sbest then
+    error "Sbest is not assigned. Run Step 5E first.";
+end if;
+
+F := GF(7);
+
+function SignedGF7(a)
+    a := F!a;
+    if a eq F!0 then
+        return 0;
+    elif a eq F!1 then
+        return 1;
+    elif a eq F!2 then
+        return 2;
+    elif a eq F!3 then
+        return 3;
+    elif a eq F!4 then
+        return -3;
+    elif a eq F!5 then
+        return -2;
+    elif a eq F!6 then
+        return -1;
+    end if;
+end function;
+
+function TraceProfile(M)
+    return [SignedGF7(Trace(M^i)) : i in [1..3]];
+end function;
+
+function BlockDiag2(F, B1, B2)
+    n1 := Nrows(B1);
+    n2 := Nrows(B2);
+    M := ZeroMatrix(F, n1+n2, n1+n2);
+
+    for i in [1..n1] do
+        for j in [1..n1] do
+            M[i,j] := B1[i,j];
+        end for;
+    end for;
+
+    for i in [1..n2] do
+        for j in [1..n2] do
+            M[n1+i,n1+j] := B2[i,j];
+        end for;
+    end for;
+
+    return M;
+end function;
+
+function BuildEquationMatrix(C, B)
+    F := BaseRing(C);
+    n := Nrows(C);
+    rows := [];
+
+    for i in [1..n] do
+        for j in [1..n] do
+            row := [F!0 : k in [1..n*n]];
+
+            for a in [1..n] do
+                idx := (a-1)*n + j;
+                row[idx] +:= C[i,a];
+            end for;
+
+            for b in [1..n] do
+                idx := (i-1)*n + b;
+                row[idx] -:= B[b,j];
+            end for;
+
+            Append(~rows, row);
+        end for;
+    end for;
+
+    return Matrix(F, rows);
+end function;
+
+function MatFromVec_ColMajor(v, n, F)
+    s := Eltseq(v);
+    return Matrix(F, n, n, [s[(j-1)*n + i] : i in [1..n], j in [1..n]]);
+end function;
+
+function ScalarMultipleInfo(X, Y, F)
+    for lambda in F do
+        if X eq lambda * Y then
+            return true, lambda;
+        end if;
+    end for;
+
+    return false, F!0;
+end function;
+
+function ScaleToExactForm(Y, S, F)
+    // If Y*S*Y^T = lambda*S, try c*Y with c^2*lambda=1.
+    Sf := Y*S*Transpose(Y);
+    isScalar, lambda := ScalarMultipleInfo(Sf, S, F);
+
+    if not isScalar or lambda eq F!0 then
+        return false, Y, F!0, F!0;
+    end if;
+
+    for c in F do
+        if c ne F!0 and c^2 * lambda eq F!1 then
+            return true, c*Y, lambda, c;
+        end if;
+    end for;
+
+    return false, Y, lambda, F!0;
+end function;
+
+///////////////////////////////////////////////////////////////
+// Extract 24D part
+///////////////////////////////////////////////////////////////
+
+A24 := Submatrix(Aadapt, 3, 3, 24, 24);
+S24 := Submatrix(Sadapt, 3, 3, 24, 24);
+S00 := Submatrix(Sadapt, 1, 1, 2, 2);
+
+print "Rank(S24) =", Rank(S24);
+print "A24 preserves S24?",
+    A24*S24*Transpose(A24) eq S24;
+
+///////////////////////////////////////////////////////////////
+// Build full 24D transporter space
+///////////////////////////////////////////////////////////////
+
+print "";
+print "Building full 24D transporter space:";
+print "Equation: A24*Y = Y*A24^10";
+
+L24 := BuildEquationMatrix(A24, A24^10);
+K24 := Nullspace(Transpose(L24));
+B24 := Basis(K24);
+
+print "Equation matrix rank =", Rank(L24);
+print "Dimension K24 =", Dimension(K24);
+
+print "";
+print "Testing first few basis vectors:";
+
+for r in [1..Minimum(5,#B24)] do
+    Ytest := MatFromVec_ColMajor(B24[r], 24, F);
+    print "  basis", r, "satisfies transporter?",
+        A24*Ytest eq Ytest*A24^10;
+end for;
+
+///////////////////////////////////////////////////////////////
+// Recompute good 2D fixed blocks preserving S00
+///////////////////////////////////////////////////////////////
+
+fixedCandidates := [];
+
+for a in F do
+for b in F do
+for c in F do
+for d in F do
+
+    F0 := Matrix(F, 2, 2, [a,b,c,d]);
+
+    if Rank(F0) eq 2 then
+        if F0*S00*Transpose(F0) eq S00 then
+            if Order(F0) eq 6 and TraceProfile(F0) eq [1,-1,-2] then
+                Append(~fixedCandidates, F0);
+            end if;
+        end if;
+    end if;
+
+end for;
+end for;
+end for;
+end for;
+
+print "";
+print "Good fixed 2D candidates =", #fixedCandidates;
+
+///////////////////////////////////////////////////////////////
+// Random search in full K24
+///////////////////////////////////////////////////////////////
+
+maxSamples5H := 3000;
+
+invertibleCount := 0;
+traceZeroCount := 0;
+exactFormCount := 0;
+scalarFormCount := 0;
+scaledExactCount := 0;
+order6Count := 0;
+good24Count := 0;
+
+bestDeltaRank := 999;
+
+print "";
+print "Random search in full K24, samples =", maxSamples5H;
+
+for trial in [1..maxSamples5H] do
+
+    v := K24!0;
+
+    for r in [1..#B24] do
+        coeff := Random(F);
+        if coeff ne F!0 then
+            v +:= coeff * B24[r];
+        end if;
+    end for;
+
+    Y := MatFromVec_ColMajor(v, 24, F);
+
+    if A24*Y ne Y*A24^10 then
+        error "Bad transporter conversion in Step 5H.";
+    end if;
+
+    if Rank(Y) eq 24 then
+        invertibleCount +:= 1;
+
+        profY := TraceProfile(Y);
+
+        if profY eq [0,0,0] then
+            traceZeroCount +:= 1;
+        end if;
+
+        Delta := Y*S24*Transpose(Y) - S24;
+        dr := Rank(Delta);
+
+        if dr lt bestDeltaRank then
+            bestDeltaRank := dr;
+            print "  new best delta rank =", bestDeltaRank, "at trial", trial,
+                  " trace =", profY;
+        end if;
+
+        if Delta eq ZeroMatrix(F,24,24) then
+            exactFormCount +:= 1;
+
+            if Order(Y) eq 6 then
+                order6Count +:= 1;
+            end if;
+
+            if Order(Y) eq 6 and profY eq [0,0,0] then
+                Y24good := Y;
+                good24Count +:= 1;
+                print "";
+                print "SUCCESS: exact form-preserving Y24 found.";
+                print "  trial =", trial;
+                print "  Order(Y24good) =", Order(Y24good);
+                print "  Trace profile =", TraceProfile(Y24good);
+                break;
+            end if;
+
+        else
+            isScalar, lambda := ScalarMultipleInfo(Y*S24*Transpose(Y), S24, F);
+
+            if isScalar and lambda ne F!0 then
+                scalarFormCount +:= 1;
+
+                canScale, Yscaled, lambda0, c0 := ScaleToExactForm(Y, S24, F);
+
+                if canScale then
+                    scaledExactCount +:= 1;
+
+                    if Yscaled*S24*Transpose(Yscaled) ne S24 then
+                        error "Scaling logic failed.";
+                    end if;
+
+                    profScaled := TraceProfile(Yscaled);
+
+                    if Order(Yscaled) eq 6 then
+                        order6Count +:= 1;
+                    end if;
+
+                    if Order(Yscaled) eq 6 and profScaled eq [0,0,0] then
+                        Y24good := Yscaled;
+                        good24Count +:= 1;
+
+                        print "";
+                        print "SUCCESS: scaled form-preserving Y24 found.";
+                        print "  trial =", trial;
+                        print "  original scalar lambda =", lambda0;
+                        print "  scaling c =", c0;
+                        print "  Order(Y24good) =", Order(Y24good);
+                        print "  Trace profile =", TraceProfile(Y24good);
+                        break;
+                    end if;
+                end if;
+            end if;
+        end if;
+    end if;
+
+    if trial mod 250 eq 0 then
+        print "  samples =", trial,
+              " invertible =", invertibleCount,
+              " traceZero =", traceZeroCount,
+              " exactForm =", exactFormCount,
+              " scalarForm =", scalarFormCount,
+              " scaledExact =", scaledExactCount,
+              " bestDeltaRank =", bestDeltaRank;
+    end if;
+end for;
+
+///////////////////////////////////////////////////////////////
+// Combine with 2D fixed block if good Y24 found
+///////////////////////////////////////////////////////////////
+
+goodFull := false;
+
+if good24Count gt 0 and #fixedCandidates gt 0 then
+
+    for F0 in fixedCandidates do
+
+        FadaptGood := BlockDiag2(F, F0, Y24good);
+
+        okTransporter := Aadapt*FadaptGood eq FadaptGood*Aadapt^10;
+        okForm := FadaptGood*Sadapt*Transpose(FadaptGood) eq Sadapt;
+        okOrder := Order(FadaptGood) eq 6;
+        okTrace := TraceProfile(FadaptGood) eq [1,-1,-2];
+
+        print "";
+        print "Testing full FadaptGood:";
+        print "  transporter equation?", okTransporter;
+        print "  preserves Sadapt?", okForm;
+        print "  Order =", Order(FadaptGood);
+        print "  Trace profile =", TraceProfile(FadaptGood);
+
+        if okTransporter and okForm and okOrder and okTrace then
+
+            fBilinGL := Tadapt^-1 * FadaptGood * Tadapt;
+
+            print "";
+            print "SUCCESS: full bilinear-form-compatible fBilinGL found.";
+            print "In original coordinates:";
+            print "  fBilinGL^-1*A*fBilinGL = A^10 ?",
+                fBilinGL^-1*A*fBilinGL eq A^10;
+            print "  fBilinGL preserves Sbest?",
+                fBilinGL*Sbest*Transpose(fBilinGL) eq Sbest;
+            print "  Order(fBilinGL) =", Order(fBilinGL);
+            print "  Trace profile fBilinGL =", TraceProfile(fBilinGL);
+
+            goodFull := true;
+            break;
+        end if;
+    end for;
+end if;
+
+print "";
+print "STEP 5H SUMMARY:";
+print "Samples =", maxSamples5H;
+print "Invertible transporters =", invertibleCount;
+print "Trace-zero [0,0,0] transporters =", traceZeroCount;
+print "Exact S24-preserving transporters =", exactFormCount;
+print "Scalar S24-preserving transporters =", scalarFormCount;
+print "Scaled exact form transporters =", scaledExactCount;
+print "Order-6 form candidates =", order6Count;
+print "Good 24D candidates =", good24Count;
+print "Best delta rank seen =", bestDeltaRank;
+
+if goodFull then
+    print "";
+    print "STEP 5H RESULT:";
+    print "We found a bilinear-form-compatible local f.";
+    print "Next step: test stronger F4 minimal-module invariant.";
+else
+    print "";
+    print "STEP 5H RESULT:";
+    print "No full bilinear-form-compatible f found in this random sample.";
+    print "This does not prove non-existence.";
+    print "If best delta rank is not close to 0, random search is too weak.";
+    print "Next step should be deterministic: solve the 24D isometry problem using the centralizer algebra.";
+end if;
