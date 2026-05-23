@@ -1,0 +1,150 @@
+///////////////////////////////////////////////////////////////
+// STEP 5B ALL-IN-ONE:
+// Rebuild genuine F4(7), find g, then inspect V26 under g.
+//
+// Goal:
+//   Check whether V26 under g has structure:
+//
+//       V26 = 2D fixed space + two 12D cyclotomic pieces
+//
+// Expected:
+//   charpoly(g) = (x-1)^2 * Phi_13(x)^2
+//   minpoly(g)  = (x-1) * Phi_13(x)
+//   dim Fix(g)  = 2
+//
+// No Normalizer.
+// No IsConjugate.
+///////////////////////////////////////////////////////////////
+
+SetSeed(1);
+
+F := GF(7);
+
+print "============================================================";
+print "STEP 5B ALL-IN-ONE: REBUILD F4(7), FIND g, DECOMPOSE V26";
+print "============================================================";
+
+print "Building G := ChevalleyGroup(\"F\",4,GF(7))...";
+G := ChevalleyGroup("F", 4, F);
+
+print "Degree =", Degree(G);
+print "Base ring =", BaseRing(G);
+print "Number of generators =", Ngens(G);
+
+///////////////////////////////////////////////////////////////
+// Find g again
+///////////////////////////////////////////////////////////////
+
+print "";
+print "Finding g of order 13 with Trace(g)=0...";
+
+foundG := false;
+maxTrialsG := 300;
+
+for trial in [1..maxTrialsG] do
+    y := Random(G);
+    oy := Order(y);
+
+    if oy mod 13 eq 0 then
+        gg := y^(oy div 13);
+
+        if Order(gg) eq 13 and Trace(gg) eq F!0 then
+            g := gg;
+            foundG := true;
+
+            print "SUCCESS: found g.";
+            print "Trial =", trial;
+            print "Original random element order =", oy;
+            print "Order(g) =", Order(g);
+            print "Trace(g) =", Trace(g);
+            print "Trace(g^i), i=1..12 =",
+                [Trace(g^i) : i in [1..12]];
+
+            break;
+        end if;
+    end if;
+end for;
+
+if not foundG then
+    error "No suitable g found. Increase maxTrialsG.";
+end if;
+
+///////////////////////////////////////////////////////////////
+// Structural decomposition under g
+///////////////////////////////////////////////////////////////
+
+print "";
+print "============================================================";
+print "STRUCTURAL DECOMPOSITION OF V26 UNDER g";
+print "============================================================";
+
+d := Degree(G);
+A := Matrix(g);
+Id26 := IdentityMatrix(F, d);
+
+P<x> := PolynomialRing(F);
+
+print "Degree =", d;
+print "Order(g) =", Order(g);
+print "Trace(g) =", Trace(g);
+
+print "";
+print "Characteristic polynomial of g:";
+charG := P!CharacteristicPolynomial(A);
+print charG;
+
+print "";
+print "Factorisation of characteristic polynomial:";
+facChar := Factorization(charG);
+print facChar;
+
+print "";
+print "Minimal polynomial of g:";
+minG := P!MinimalPolynomial(A);
+print minG;
+
+print "";
+print "Factorisation of minimal polynomial:";
+facMin := Factorization(minG);
+print facMin;
+
+print "";
+print "Fixed space of g:";
+Kfix := Nullspace(A - Id26);
+print "Dimension Nullspace(g-I) =", Dimension(Kfix);
+
+print "";
+print "Image/rank checks:";
+print "Rank(g-I) =", Rank(A - Id26);
+print "Nullity(g-I) =", d - Rank(A - Id26);
+
+print "";
+print "Cyclotomic polynomial Phi_13 over GF(7):";
+Phi13 := &+[x^i : i in [0..12]];
+print "Phi13 =", Phi13;
+
+print "";
+print "Factorisation Phi13 over GF(7):";
+print Factorization(Phi13);
+
+print "";
+print "Check expected characteristic polynomial:";
+expectedChar := (x - F!1)^2 * Phi13^2;
+print "charG eq (x-1)^2 * Phi13^2 ?", charG eq expectedChar;
+
+print "";
+print "Check expected minimal polynomial:";
+expectedMin := (x - F!1) * Phi13;
+print "minG eq (x-1) * Phi13 ?", minG eq expectedMin;
+
+print "";
+print "STEP 5B SUMMARY:";
+
+if charG eq expectedChar and minG eq expectedMin and Dimension(Kfix) eq 2 then
+    print "GOOD: g has exactly the expected V26 structure.";
+    print "V26 = 2D fixed part + 24D nontrivial part.";
+    print "The 24D part is two copies of the 12D cyclotomic module.";
+    print "Next step: build an adapted basis for 2 + 12 + 12.";
+else
+    print "Unexpected structure. Send this output before continuing.";
+end if;
