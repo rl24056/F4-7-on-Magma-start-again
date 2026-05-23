@@ -1,1 +1,286 @@
 
+///////////////////////////////////////////////////////////////
+// STEP 5C-ROBUST ALL-IN-ONE:
+// Rebuild F4(7), find g, build 2+12+12 basis,
+// then diagnose the correct change-of-basis convention.
+//
+// This fixes the previous issue where the mathematical spaces
+// were correct but Anew was not block diagonal because the
+// basis/matrix convention was wrong.
+///////////////////////////////////////////////////////////////
+
+SetSeed(2);
+
+F := GF(7);
+
+print "============================================================";
+print "STEP 5C-ROBUST: CLEAN 2+12+12 BASIS WITH CONVENTION CHECK";
+print "============================================================";
+
+print "Building G := ChevalleyGroup(\"F\",4,GF(7))...";
+G := ChevalleyGroup("F", 4, F);
+
+print "Degree =", Degree(G);
+print "Base ring =", BaseRing(G);
+
+///////////////////////////////////////////////////////////////
+// Find g
+///////////////////////////////////////////////////////////////
+
+print "";
+print "Finding g of order 13 with Trace(g)=0...";
+
+foundG := false;
+maxTrialsG := 500;
+
+for trial in [1..maxTrialsG] do
+    y := Random(G);
+    oy := Order(y);
+
+    if oy mod 13 eq 0 then
+        gg := y^(oy div 13);
+
+        if Order(gg) eq 13 and Trace(gg) eq F!0 then
+            g := gg;
+            foundG := true;
+
+            print "SUCCESS: found g.";
+            print "Trial =", trial;
+            print "Original random element order =", oy;
+            print "Order(g) =", Order(g);
+            print "Trace(g) =", Trace(g);
+
+            break;
+        end if;
+    end if;
+end for;
+
+if not foundG then
+    error "No suitable g found.";
+end if;
+
+///////////////////////////////////////////////////////////////
+// Build row-vector spaces
+///////////////////////////////////////////////////////////////
+
+d := Degree(G);
+A := Matrix(g);
+Id26 := IdentityMatrix(F, d);
+V := VectorSpace(F, d);
+
+print "";
+print "Computing Fix(g) and Wnon = RowSpace(g-I)...";
+
+Kfix := Nullspace(A - Id26);
+Wnon := RowSpace(A - Id26);
+
+fixBasis := Basis(Kfix);
+wBasis := Basis(Wnon);
+
+print "dim Fix(g) =", Dimension(Kfix);
+print "dim Wnon =", Dimension(Wnon);
+print "dim Fix + Wnon =", Dimension(sub< V | fixBasis cat wBasis >);
+
+print "";
+print "Check fixed basis vectors really satisfy v*A = v:";
+for i in [1..#fixBasis] do
+    print "  fixed basis", i, ":", fixBasis[i] * A eq fixBasis[i];
+end for;
+
+print "";
+print "Check Wnon is invariant under A:";
+wInvariant := true;
+for i in [1..#wBasis] do
+    if not (wBasis[i] * A in Wnon) then
+        wInvariant := false;
+    end if;
+end for;
+print "  Wnon invariant?", wInvariant;
+
+if Dimension(Kfix) ne 2 or Dimension(Wnon) ne 24 or Dimension(sub< V | fixBasis cat wBasis >) ne 26 then
+    error "Unexpected Fix/Wnon structure.";
+end if;
+
+///////////////////////////////////////////////////////////////
+// Build two 12D cyclic blocks inside Wnon
+///////////////////////////////////////////////////////////////
+
+function CyclicRows(v, A, len)
+    rows := [];
+    w := v;
+    for i in [0..len-1] do
+        Append(~rows, w);
+        w := w * A;
+    end for;
+    return rows;
+end function;
+
+currentRows := [fixBasis[i] : i in [1..#fixBasis]];
+currentSpace := sub< V | currentRows >;
+
+for blockNo in [1..2] do
+
+    print "";
+    print "Searching for cyclic block", blockNo, "inside Wnon";
+
+    foundBlock := false;
+
+    for trial in [1..1000] do
+        v := Random(Wnon);
+        cyc := CyclicRows(v, A, 12);
+        C := sub< V | cyc >;
+
+        if Dimension(C) eq 12 then
+            invariantC := (cyc[12] * A) in C;
+            testSpace := sub< V | currentRows cat cyc >;
+
+            if invariantC and Dimension(testSpace) eq Dimension(currentSpace) + 12 then
+
+                print "  Found block", blockNo, "at trial", trial;
+                print "  dim cyclic span =", Dimension(C);
+                print "  invariant under g?", invariantC;
+                print "  new total dimension =", Dimension(testSpace);
+
+                currentRows := currentRows cat cyc;
+                currentSpace := testSpace;
+
+                foundBlock := true;
+                break;
+            end if;
+        end if;
+    end for;
+
+    if not foundBlock then
+        error "Failed to find cyclic block.";
+    end if;
+end for;
+
+print "";
+print "Final row count =", #currentRows;
+print "Final span dimension =", Dimension(sub< V | currentRows >);
+
+if #currentRows ne 26 or Dimension(sub< V | currentRows >) ne 26 then
+    error "currentRows is not a basis.";
+end if;
+
+///////////////////////////////////////////////////////////////
+// Build T explicitly, no sequence-orientation ambiguity
+///////////////////////////////////////////////////////////////
+
+Trow := ZeroMatrix(F, 26, 26);
+Tcol := ZeroMatrix(F, 26, 26);
+
+for i in [1..26] do
+    for j in [1..26] do
+        // rows are basis vectors
+        Trow[i,j] := currentRows[i][j];
+
+        // columns are basis vectors
+        Tcol[j,i] := currentRows[i][j];
+    end for;
+end for;
+
+print "";
+print "Rank(Trow) =", Rank(Trow);
+print "Rank(Tcol) =", Rank(Tcol);
+
+if Rank(Trow) ne 26 or Rank(Tcol) ne 26 then
+    error "Basis matrix is not invertible.";
+end if;
+
+///////////////////////////////////////////////////////////////
+// Test change-of-basis conventions
+///////////////////////////////////////////////////////////////
+
+function IsGoodBlock(M, F)
+    goodFix := Submatrix(M, 1, 1, 2, 2) eq IdentityMatrix(F, 2);
+    topRightZero := Submatrix(M, 1, 3, 2, 24) eq ZeroMatrix(F, 2, 24);
+    bottomLeftZero := Submatrix(M, 3, 1, 24, 2) eq ZeroMatrix(F, 24, 2);
+    cross12abZero := Submatrix(M, 3, 15, 12, 12) eq ZeroMatrix(F, 12, 12);
+    cross12baZero := Submatrix(M, 15, 3, 12, 12) eq ZeroMatrix(F, 12, 12);
+
+    return goodFix and topRightZero and bottomLeftZero and cross12abZero and cross12baZero;
+end function;
+
+procedure PrintBlockFlags(label, M, F)
+    print "";
+    print label;
+    print "  fixed block identity?",
+        Submatrix(M, 1, 1, 2, 2) eq IdentityMatrix(F, 2);
+    print "  top-right 2x24 zero?",
+        Submatrix(M, 1, 3, 2, 24) eq ZeroMatrix(F, 2, 24);
+    print "  bottom-left 24x2 zero?",
+        Submatrix(M, 3, 1, 24, 2) eq ZeroMatrix(F, 24, 2);
+    print "  C1 -> C2 zero?",
+        Submatrix(M, 3, 15, 12, 12) eq ZeroMatrix(F, 12, 12);
+    print "  C2 -> C1 zero?",
+        Submatrix(M, 15, 3, 12, 12) eq ZeroMatrix(F, 12, 12);
+end procedure;
+
+M1 := Trow * A * Trow^-1;
+M2 := Trow^-1 * A * Trow;
+M3 := Tcol * A * Tcol^-1;
+M4 := Tcol^-1 * A * Tcol;
+
+PrintBlockFlags("Convention M1 = Trow*A*Trow^-1", M1, F);
+PrintBlockFlags("Convention M2 = Trow^-1*A*Trow", M2, F);
+PrintBlockFlags("Convention M3 = Tcol*A*Tcol^-1", M3, F);
+PrintBlockFlags("Convention M4 = Tcol^-1*A*Tcol", M4, F);
+
+print "";
+print "Choosing good convention...";
+
+chosen := "none";
+
+if IsGoodBlock(M1, F) then
+    chosen := "M1 = Trow*A*Trow^-1";
+    Tadapt := Trow;
+    Aadapt := M1;
+elif IsGoodBlock(M2, F) then
+    chosen := "M2 = Trow^-1*A*Trow";
+    Tadapt := Trow;
+    Aadapt := M2;
+elif IsGoodBlock(M3, F) then
+    chosen := "M3 = Tcol*A*Tcol^-1";
+    Tadapt := Tcol;
+    Aadapt := M3;
+elif IsGoodBlock(M4, F) then
+    chosen := "M4 = Tcol^-1*A*Tcol";
+    Tadapt := Tcol;
+    Aadapt := M4;
+end if;
+
+print "Chosen convention =", chosen;
+
+if chosen eq "none" then
+    print "";
+    print "No convention gave perfect block form.";
+    print "Send this output before continuing.";
+else
+    print "";
+    print "SUCCESS: clean block form obtained.";
+    print "Stored:";
+    print "  G, g, A";
+    print "  Tadapt";
+    print "  Aadapt = g in clean 2+12+12 basis";
+
+    Afix := Submatrix(Aadapt, 1, 1, 2, 2);
+    A12a := Submatrix(Aadapt, 3, 3, 12, 12);
+    A12b := Submatrix(Aadapt, 15, 15, 12, 12);
+
+    print "";
+    print "Diagonal block orders:";
+    print "  Order fixed block =", Order(Afix);
+    print "  Order first 12 block =", Order(A12a);
+    print "  Order second 12 block =", Order(A12b);
+
+    print "";
+    print "Diagonal block characteristic polynomials:";
+    print "  char fixed block =", CharacteristicPolynomial(Afix);
+    print "  char first 12 block =", CharacteristicPolynomial(A12a);
+    print "  char second 12 block =", CharacteristicPolynomial(A12b);
+
+    print "";
+    print "STEP 5C-ROBUST COMPLETE.";
+    print "Next step: construct controlled order-6 transporter in this basis.";
+end if;
