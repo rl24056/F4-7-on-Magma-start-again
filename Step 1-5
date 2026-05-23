@@ -1,0 +1,972 @@
+///////////////////////////////////////////////////////////////
+// STEP 1: Build genuine F4(7) in Magma and find g of order 13
+//         with trace 0 on the 26-dimensional module.
+//
+// New strategy:
+//   Work in genuine Magma F4(7) on V26 first.
+//   First target: find g with Order(g)=13 and Trace(g)=0.
+//   Do NOT use Normalizer or IsConjugate in this step.
+///////////////////////////////////////////////////////////////
+
+SetSeed(1);
+
+F := GF(7);
+
+function SignedGF7(a)
+    a := F!a;
+    if a eq F!0 then
+        return 0;
+    elif a eq F!1 then
+        return 1;
+    elif a eq F!2 then
+        return 2;
+    elif a eq F!3 then
+        return 3;
+    elif a eq F!4 then
+        return -3;
+    elif a eq F!5 then
+        return -2;
+    elif a eq F!6 then
+        return -1;
+    end if;
+end function;
+
+print "============================================================";
+print "STEP 1: BUILD GENUINE F4(7) AND FIND ORDER-13 TRACE-0 g";
+print "============================================================";
+
+print "Building G := ChevalleyGroup(\"F\",4,GF(7))...";
+G := ChevalleyGroup("F", 4, F);
+
+print "Basic checks:";
+print "Base ring =", BaseRing(G);
+print "Degree =", Degree(G);
+print "Number of generators =", Ngens(G);
+print "Factored order of G =";
+print FactoredOrder(G);
+
+print "";
+print "Generator checks on V26:";
+for i in [1..Ngens(G)] do
+    x := G.i;
+    print "Generator", i;
+    print "  Order =", Order(x);
+    print "  Trace =", SignedGF7(Trace(x));
+    print "  Trace powers [x,x^2,x^3] =",
+        [SignedGF7(Trace(x^j)) : j in [1..3]];
+end for;
+
+print "";
+print "Random search for g with Order(g)=13 and Trace(g)=0...";
+
+found := false;
+maxTrials := 300;
+
+for trial in [1..maxTrials] do
+
+    x := Random(G);
+    ox := Order(x);
+
+    if ox mod 13 eq 0 then
+
+        gCandidate := x^(ox div 13);
+
+        if Order(gCandidate) eq 13 then
+
+            tr := Trace(gCandidate);
+
+            if tr eq F!0 then
+                g := gCandidate;
+                found := true;
+
+                print "";
+                print "SUCCESS: found g.";
+                print "Trial =", trial;
+                print "Original random element order =", ox;
+                print "Order(g) =", Order(g);
+                print "Trace(g) =", SignedGF7(Trace(g));
+                print "Trace(g^i), i=1..12 =",
+                    [SignedGF7(Trace(g^i)) : i in [1..12]];
+
+                break;
+            end if;
+        end if;
+    end if;
+
+    if trial mod 25 eq 0 then
+        print "  trials done =", trial;
+    end if;
+end for;
+
+if not found then
+    print "";
+    print "NO g found within", maxTrials, "trials.";
+    print "This is not a mathematical failure. Increase maxTrials and rerun.";
+else
+    print "";
+    print "STEP 1 COMPLETE.";
+    print "We now have g of order 13 with trace 0 on V26.";
+    print "Next step will search for f of order 6 with g^f = g^k, k != 1, ideally k = 10.";
+end if;
+
+///////////////////////////////////////////////////////////////
+// STEP 2: Light search for f of order 6 normalising <g>
+//
+// We already have:
+//   G = ChevalleyGroup("F",4,GF(7))
+//   g = order 13 trace 0 element
+//
+// Goal:
+//   Find f with:
+//     Order(f) = 6
+//     Trace(f)   = 1
+//     Trace(f^2) = -1
+//     Trace(f^3) = -2
+//     g^f = g^k with k != 1, ideally k = 10
+//
+// Important:
+//   No Normalizer.
+//   No IsConjugate.
+//   This is only a light Magma Online-safe search.
+///////////////////////////////////////////////////////////////
+
+print "";
+print "============================================================";
+print "STEP 2: LIGHT SEARCH FOR f NORMALISING <g>";
+print "============================================================";
+
+if not assigned g then
+    error "Step 1 g is not assigned. Run Step 1 first.";
+end if;
+
+F := GF(7);
+
+function SignedGF7(a)
+    a := F!a;
+    if a eq F!0 then
+        return 0;
+    elif a eq F!1 then
+        return 1;
+    elif a eq F!2 then
+        return 2;
+    elif a eq F!3 then
+        return 3;
+    elif a eq F!4 then
+        return -3;
+    elif a eq F!5 then
+        return -2;
+    elif a eq F!6 then
+        return -1;
+    end if;
+end function;
+
+function TraceProfile26(x)
+    return [
+        SignedGF7(Trace(x)),
+        SignedGF7(Trace(x^2)),
+        SignedGF7(Trace(x^3))
+    ];
+end function;
+
+function PowerExponentInG(g, y)
+    // Return k if y = g^k for k = 0,...,12.
+    // Return -1 if y is not in <g>.
+    for k in [0..12] do
+        if y eq g^k then
+            return k;
+        end if;
+    end for;
+    return -1;
+end function;
+
+function ActionExponentOnP(g, x)
+    // Computes exponent k such that g^x = g^k.
+    // In Magma, g^x means x^-1*g*x.
+    y := g^x;
+    return PowerExponentInG(g, y);
+end function;
+
+print "Check g:";
+print "Order(g) =", Order(g);
+print "Trace(g) =", SignedGF7(Trace(g));
+
+print "";
+print "First test the two standard generators:";
+for i in [1..Ngens(G)] do
+    x := G.i;
+    k := ActionExponentOnP(g, x);
+
+    print "Generator", i;
+    print "  Order =", Order(x);
+    print "  Trace profile [x,x^2,x^3] =", TraceProfile26(x);
+    print "  action exponent on <g> =", k;
+
+    if k ne -1 then
+        print "  So g^x = g^", k;
+    else
+        print "  Does not normalise <g>.";
+    end if;
+end for;
+
+print "";
+print "Now random search for order-6 candidates.";
+
+maxTrials2 := 2000;
+foundF := false;
+
+profileCounts := AssociativeArray();
+
+for trial in [1..maxTrials2] do
+
+    x := Random(G);
+    ox := Order(x);
+
+    // Extract possible order-6 element from x if 6 divides Order(x)
+    if ox mod 6 eq 0 then
+
+        fCandidate := x^(ox div 6);
+
+        if Order(fCandidate) eq 6 then
+
+            prof := TraceProfile26(fCandidate);
+            key := Sprint(prof);
+
+            if IsDefined(profileCounts, key) then
+                profileCounts[key] +:= 1;
+            else
+                profileCounts[key] := 1;
+            end if;
+
+            // Target V26 f-profile is [1,-1,-2]
+            if prof eq [1,-1,-2] then
+
+                k := ActionExponentOnP(g, fCandidate);
+
+                if k ne -1 then
+                    print "";
+                    print "SUCCESS: found f normalising <g>.";
+                    print "Trial =", trial;
+                    print "Original random element order =", ox;
+                    print "Order(f) =", Order(fCandidate);
+                    print "Trace profile [f,f^2,f^3] =", prof;
+                    print "Action exponent k with g^f = g^k:", k;
+
+                    f := fCandidate;
+                    foundF := true;
+
+                    B := sub< G | g, f >;
+                    print "|<g,f>| =", Order(B);
+
+                    if k eq 10 then
+                        print "Excellent: exponent is k=10, exactly the Walton target.";
+                    elif k ne 1 then
+                        print "Good: non-centralising normaliser action.";
+                    else
+                        print "Warning: f centralises g, so this is not enough.";
+                    end if;
+
+                    break;
+                end if;
+            end if;
+        end if;
+    end if;
+
+    if trial mod 100 eq 0 then
+        print "  trials done =", trial;
+    end if;
+end for;
+
+print "";
+print "Observed order-6 trace profiles:";
+for key in Keys(profileCounts) do
+    print key, ":", profileCounts[key];
+end for;
+
+if not foundF then
+    print "";
+    print "No suitable f found in this light random search.";
+    print "This is expected: for fixed g, random f normalising <g> is very rare.";
+    print "Step 2 is still useful because it tests the functions and trace profiles.";
+    print "Next we should use a more structured search, not blind random search.";
+else
+    print "";
+    print "STEP 2 COMPLETE.";
+    print "We now have f.";
+    print "Next step will verify B=<g,f> is 13:6 and then search for t.";
+end if;
+///////////////////////////////////////////////////////////////
+// STEP 3: GL26 transporter diagnostics for <g>
+//
+// We already have:
+//   G = F4(7) on V26
+//   g of order 13 and Trace(g)=0
+//
+// Goal:
+//   For k = 1..12, solve the linear equation
+//
+//       g X = X g^k
+//
+//   inside Mat_26(GF(7)).
+//
+// This checks whether g and g^k are conjugate in GL26(7).
+// It does NOT yet mean the transporter lies in F4(7).
+///////////////////////////////////////////////////////////////
+
+print "";
+print "============================================================";
+print "STEP 3: GL26 TRANSPORTER DIAGNOSTIC FOR g -> g^k";
+print "============================================================";
+
+if not assigned G then
+    error "G is not assigned. Run Step 1 first.";
+end if;
+
+if not assigned g then
+    error "g is not assigned. Run Step 1 first.";
+end if;
+
+F := GF(7);
+d := Degree(G);
+
+print "Degree =", d;
+print "Order(g) =", Order(g);
+print "Trace(g) =", Trace(g);
+
+M := Matrix(g);
+
+function TransporterSpaceDim(A, B)
+    // Computes dimension of the solution space:
+    //     A X = X B
+    // for X a d x d matrix over F.
+    F := BaseRing(A);
+    d := Nrows(A);
+
+    rows := [];
+
+    // Unknowns are X_{i,j}, ordered by (i,j)
+    for i in [1..d] do
+        for j in [1..d] do
+
+            // Equation for entry (i,j) of A X - X B = 0
+            row := [F!0 : n in [1..d*d]];
+
+            // (A X)_{i,j} = sum_a A_{i,a} X_{a,j}
+            for a in [1..d] do
+                idx := (a-1)*d + j;
+                row[idx] +:= A[i,a];
+            end for;
+
+            // (X B)_{i,j} = sum_b X_{i,b} B_{b,j}
+            for b in [1..d] do
+                idx := (i-1)*d + b;
+                row[idx] -:= B[b,j];
+            end for;
+
+            Append(~rows, row);
+        end for;
+    end for;
+
+    L := Matrix(F, rows);
+    K := Nullspace(L);
+
+    return Dimension(K), K;
+end function;
+
+print "";
+print "Computing transporter-space dimensions:";
+print "k : dim { X | gX = Xg^k }";
+
+transporterDims := [];
+
+for k in [1..12] do
+    dimK, K := TransporterSpaceDim(Matrix(g), Matrix(g^k));
+    Append(~transporterDims, <k, dimK>);
+    print k, ":", dimK;
+end for;
+
+print "";
+print "Summary transporter dimensions:";
+print transporterDims;
+
+print "";
+print "Special target k=10:";
+dim10, K10 := TransporterSpaceDim(Matrix(g), Matrix(g^10));
+print "Dimension for k=10 =", dim10;
+
+print "";
+print "STEP 3 COMPLETE.";
+print "Interpretation:";
+print "Large nonzero dimension for k=10 means the action g -> g^10 is possible in GL26.";
+print "Next step will try to sample invertible matrices X from this transporter space and inspect their order/trace.";
+print "But remember: X in GL26 is not automatically in F4(7).";
+///////////////////////////////////////////////////////////////
+// STEP 4B: Diagnose correct Magma nullspace/vector orientation
+// for transporter equation g X = X g^10.
+//
+// Goal:
+//   Find which convention actually gives matrices X satisfying:
+//       A*X = X*B
+//   where A = Matrix(g), B = Matrix(g^10).
+//
+// This step does NOT search for f yet.
+// It only fixes the transporter-space construction.
+///////////////////////////////////////////////////////////////
+
+print "";
+print "============================================================";
+print "STEP 4B: TRANSPORTER ORIENTATION DIAGNOSTIC";
+print "============================================================";
+
+if not assigned G then
+    error "G is not assigned. Run Step 1 first.";
+end if;
+
+if not assigned g then
+    error "g is not assigned. Run Step 1 first.";
+end if;
+
+F := GF(7);
+d := Degree(G);
+
+A := Matrix(g);
+B := Matrix(g^10);
+
+print "Degree =", d;
+print "Order(g) =", Order(g);
+print "Testing equation A*X = X*B, where B = g^10.";
+
+function BuildEquationMatrix(A, B)
+    F := BaseRing(A);
+    d := Nrows(A);
+    rows := [];
+
+    // Unknown vector position n represents one X entry.
+    // We build equations for A*X - X*B = 0.
+    // Initial indexing assumes row-major:
+    //   pos(i,j) = (i-1)*d + j.
+    for i in [1..d] do
+        for j in [1..d] do
+            row := [F!0 : n in [1..d*d]];
+
+            for a in [1..d] do
+                idx := (a-1)*d + j;
+                row[idx] +:= A[i,a];
+            end for;
+
+            for b in [1..d] do
+                idx := (i-1)*d + b;
+                row[idx] -:= B[b,j];
+            end for;
+
+            Append(~rows, row);
+        end for;
+    end for;
+
+    return Matrix(F, rows);
+end function;
+
+function MatFromVec_RowMajor(v, d, F)
+    s := Eltseq(v);
+    return Matrix(F, d, d, [s[(i-1)*d + j] : i in [1..d], j in [1..d]]);
+end function;
+
+function MatFromVec_ColMajor(v, d, F)
+    s := Eltseq(v);
+    return Matrix(F, d, d, [s[(j-1)*d + i] : i in [1..d], j in [1..d]]);
+end function;
+
+function CountGoodBasis(V, mode, A, B, d, F)
+    bas := Basis(V);
+    good := 0;
+    tested := Minimum(10, #bas);
+
+    for r in [1..tested] do
+        if mode eq "row" then
+            X := MatFromVec_RowMajor(bas[r], d, F);
+        else
+            X := MatFromVec_ColMajor(bas[r], d, F);
+        end if;
+
+        if A*X eq X*B then
+            good +:= 1;
+        end if;
+    end for;
+
+    return good, tested;
+end function;
+
+L := BuildEquationMatrix(A, B);
+
+print "Equation matrix size =", Nrows(L), "x", Ncols(L);
+print "Rank(L) =", Rank(L);
+print "Expected nullity =", d*d - Rank(L);
+
+K_left := Nullspace(L);
+K_trans := Nullspace(Transpose(L));
+
+print "";
+print "Candidate spaces:";
+print "Dimension Nullspace(L) =", Dimension(K_left);
+print "Dimension Nullspace(Transpose(L)) =", Dimension(K_trans);
+
+print "";
+print "Testing first 10 basis vectors under four conventions:";
+
+good1, test1 := CountGoodBasis(K_left, "row", A, B, d, F);
+print "Nullspace(L) + row-major:", good1, "/", test1;
+
+good2, test2 := CountGoodBasis(K_left, "col", A, B, d, F);
+print "Nullspace(L) + col-major:", good2, "/", test2;
+
+good3, test3 := CountGoodBasis(K_trans, "row", A, B, d, F);
+print "Nullspace(Transpose(L)) + row-major:", good3, "/", test3;
+
+good4, test4 := CountGoodBasis(K_trans, "col", A, B, d, F);
+print "Nullspace(Transpose(L)) + col-major:", good4, "/", test4;
+
+print "";
+print "Choosing working convention...";
+
+chosenSpace := K_left;
+chosenMode := "none";
+
+if good1 eq test1 and test1 gt 0 then
+    chosenSpace := K_left;
+    chosenMode := "left-row";
+elif good2 eq test2 and test2 gt 0 then
+    chosenSpace := K_left;
+    chosenMode := "left-col";
+elif good3 eq test3 and test3 gt 0 then
+    chosenSpace := K_trans;
+    chosenMode := "trans-row";
+elif good4 eq test4 and test4 gt 0 then
+    chosenSpace := K_trans;
+    chosenMode := "trans-col";
+end if;
+
+print "Chosen mode =", chosenMode;
+
+if chosenMode eq "none" then
+    print "";
+    print "No convention worked. Then the equation-building itself needs changing.";
+    print "Do not continue to sampling yet.";
+else
+    K10good := chosenSpace;
+    mode10good := chosenMode;
+
+    print "";
+    print "SUCCESS: transporter construction fixed.";
+    print "Dimension K10good =", Dimension(K10good);
+    print "mode10good =", mode10good;
+    print "Next step will sample from K10good using this convention.";
+end if;
+///////////////////////////////////////////////////////////////
+// STEP 4C: Correct sampling from the transporter space K10good
+//
+// Uses result from Step 4B:
+//   K10good has dimension 52
+//   mode10good = "trans-col"
+//
+// Goal:
+//   Sample X satisfying:
+//       g X = X g^10
+//   equivalently:
+//       X^-1 g X = g^10
+//
+// Then test whether X is f-like:
+//       X invertible
+//       X^6 = I and exact order 6
+//       Trace profile [X,X^2,X^3] = [1,-1,-2]
+//
+// Warning:
+//   X is only in GL26(7), not yet proved inside F4(7).
+///////////////////////////////////////////////////////////////
+
+print "";
+print "============================================================";
+print "STEP 4C: SAMPLE CORRECT GL26 TRANSPORTERS FOR g -> g^10";
+print "============================================================";
+
+if not assigned G then
+    error "G is not assigned. Run Step 1 first.";
+end if;
+
+if not assigned g then
+    error "g is not assigned. Run Step 1 first.";
+end if;
+
+if not assigned K10good then
+    error "K10good is not assigned. Run Step 4B first.";
+end if;
+
+F := GF(7);
+d := Degree(G);
+
+function SignedGF7(a)
+    a := F!a;
+    if a eq F!0 then
+        return 0;
+    elif a eq F!1 then
+        return 1;
+    elif a eq F!2 then
+        return 2;
+    elif a eq F!3 then
+        return 3;
+    elif a eq F!4 then
+        return -3;
+    elif a eq F!5 then
+        return -2;
+    elif a eq F!6 then
+        return -1;
+    end if;
+end function;
+
+function TraceProfileMat26(X)
+    return [
+        SignedGF7(Trace(X)),
+        SignedGF7(Trace(X^2)),
+        SignedGF7(Trace(X^3))
+    ];
+end function;
+
+function MatFromVec_ColMajor(v, d, F)
+    s := Eltseq(v);
+    return Matrix(F, d, d, [s[(j-1)*d + i] : i in [1..d], j in [1..d]]);
+end function;
+
+A := Matrix(g);
+B := Matrix(g^10);
+Id := IdentityMatrix(F, d);
+
+B10good := Basis(K10good);
+
+print "Dimension K10good =", Dimension(K10good);
+print "Number of basis vectors =", #B10good;
+print "Using column-major conversion.";
+print "Checking first basis vector:";
+Xtest := MatFromVec_ColMajor(B10good[1], d, F);
+print "  A*Xtest = Xtest*B ?", A*Xtest eq Xtest*B;
+
+maxSamples4C := 5000;
+
+invertibleCount := 0;
+targetTraceCount := 0;
+order6Count := 0;
+goodGLCount := 0;
+
+profileCounts4C := AssociativeArray();
+
+print "";
+print "Sampling random transporters...";
+
+for trial in [1..maxSamples4C] do
+
+    v := K10good!0;
+
+    for i in [1..#B10good] do
+        c := Random(F);
+        if c ne F!0 then
+            v +:= c * B10good[i];
+        end if;
+    end for;
+
+    X := MatFromVec_ColMajor(v, d, F);
+
+    if A*X ne X*B then
+        error "Bad conversion: sampled X does not satisfy A*X = X*B.";
+    end if;
+
+    if Rank(X) eq d then
+
+        invertibleCount +:= 1;
+
+        prof := TraceProfileMat26(X);
+        key := Sprint(prof);
+
+        if IsDefined(profileCounts4C, key) then
+            profileCounts4C[key] +:= 1;
+        else
+            profileCounts4C[key] := 1;
+        end if;
+
+        if prof eq [1,-1,-2] then
+            targetTraceCount +:= 1;
+        end if;
+
+        if X^6 eq Id and X^3 ne Id and X^2 ne Id and X ne Id then
+
+            order6Count +:= 1;
+
+            print "";
+            print "Found exact-order-6 GL transporter.";
+            print "Trial =", trial;
+            print "Trace profile [X,X^2,X^3] =", prof;
+            print "Check X^-1*g*X = g^10?", X^-1*A*X eq B;
+
+            if prof eq [1,-1,-2] then
+                print "EXCELLENT: target GL f-like transporter found.";
+                Xgood := X;
+                goodGLCount +:= 1;
+                break;
+            end if;
+        end if;
+    end if;
+
+    if trial mod 250 eq 0 then
+        print "  samples done =", trial,
+              " invertible =", invertibleCount,
+              " targetTrace =", targetTraceCount,
+              " order6 =", order6Count;
+    end if;
+
+end for;
+
+print "";
+print "STEP 4C SUMMARY:";
+print "Samples =", maxSamples4C;
+print "Invertible transporters =", invertibleCount;
+print "Target-trace transporters [1,-1,-2] =", targetTraceCount;
+print "Exact-order-6 transporters =", order6Count;
+print "Good GL f-like transporters =", goodGLCount;
+
+print "";
+print "Observed trace profiles among invertible transporters:";
+for key in Keys(profileCounts4C) do
+    print key, ":", profileCounts4C[key];
+end for;
+
+if goodGLCount gt 0 then
+    print "";
+    print "STEP 4C RESULT:";
+    print "We found Xgood in GL26 with:";
+    print "  Xgood^-1*g*Xgood = g^10";
+    print "  Xgood has exact order 6";
+    print "  Trace profile [1,-1,-2]";
+    print "Next problem: test whether Xgood is actually in F4(7), or preserves the F4 structure.";
+else
+    print "";
+    print "STEP 4C RESULT:";
+    print "Correct sampling completed, but no target GL f-like X was found.";
+    print "This is still not a mathematical failure.";
+    print "It means random linear sampling is not enough for the nonlinear condition X^6=I.";
+    print "Next step should build f more structurally from the 13-eigenspace decomposition.";
+end if;
+///////////////////////////////////////////////////////////////
+// STEP 5A: Try order-6 powers of target-trace GL transporters
+//
+// We already have:
+//   G, g
+//   K10good from Step 4B
+//
+// We sample X satisfying:
+//       g X = X g^10
+//
+// If X has target trace [1,-1,-2], we compute Order(X).
+// Then we test powers X^n of exact order 6 with n = 1 mod 6.
+// Such powers still satisfy:
+//       g X^n = X^n g^10
+//
+// Goal:
+//   Find a GL26 f-like transporter Y with:
+//       Y^-1 g Y = g^10
+//       Order(Y)=6
+//       Trace profile [1,-1,-2]
+//
+// Still warning:
+//   Y is only in GL26(7), not yet proved inside F4(7).
+///////////////////////////////////////////////////////////////
+
+print "";
+print "============================================================";
+print "STEP 5A: ORDER-6 POWERS OF TARGET-TRACE TRANSPORTERS";
+print "============================================================";
+
+if not assigned G then
+    error "G is not assigned. Run Step 1 first.";
+end if;
+
+if not assigned g then
+    error "g is not assigned. Run Step 1 first.";
+end if;
+
+if not assigned K10good then
+    error "K10good is not assigned. Run Step 4B first.";
+end if;
+
+F := GF(7);
+d := Degree(G);
+
+function SignedGF7(a)
+    a := F!a;
+    if a eq F!0 then
+        return 0;
+    elif a eq F!1 then
+        return 1;
+    elif a eq F!2 then
+        return 2;
+    elif a eq F!3 then
+        return 3;
+    elif a eq F!4 then
+        return -3;
+    elif a eq F!5 then
+        return -2;
+    elif a eq F!6 then
+        return -1;
+    end if;
+end function;
+
+function TraceProfileMat26(X)
+    return [
+        SignedGF7(Trace(X)),
+        SignedGF7(Trace(X^2)),
+        SignedGF7(Trace(X^3))
+    ];
+end function;
+
+function MatFromVec_ColMajor(v, d, F)
+    s := Eltseq(v);
+    return Matrix(F, d, d, [s[(j-1)*d + i] : i in [1..d], j in [1..d]]);
+end function;
+
+A := Matrix(g);
+B := Matrix(g^10);
+Id := IdentityMatrix(F, d);
+
+B10good := Basis(K10good);
+
+print "Dimension K10good =", Dimension(K10good);
+print "Testing from transporter space g -> g^10.";
+
+maxSamples5A := 8000;
+maxOrderTests5A := 80;
+
+sampleCount := 0;
+invertibleCount := 0;
+targetTraceCount := 0;
+orderTests := 0;
+powerCandidatesTested := 0;
+goodPowerCount := 0;
+
+for trial in [1..maxSamples5A] do
+
+    v := K10good!0;
+
+    for i in [1..#B10good] do
+        c := Random(F);
+        if c ne F!0 then
+            v +:= c * B10good[i];
+        end if;
+    end for;
+
+    X := MatFromVec_ColMajor(v, d, F);
+
+    if A*X ne X*B then
+        error "Bad X: transporter equation failed.";
+    end if;
+
+    sampleCount +:= 1;
+
+    if Rank(X) eq d then
+
+        invertibleCount +:= 1;
+        profX := TraceProfileMat26(X);
+
+        if profX eq [1,-1,-2] then
+
+            targetTraceCount +:= 1;
+
+            if orderTests lt maxOrderTests5A then
+
+                orderTests +:= 1;
+                oX := Order(X);
+
+                print "";
+                print "Target-trace transporter #", targetTraceCount;
+                print "  trial =", trial;
+                print "  Order(X) =", oX;
+                print "  Factorisation =", Factorization(oX);
+
+                if oX mod 6 ne 0 then
+                    print "  Order not divisible by 6, unexpected for transporter quotient.";
+                else
+                    baseExp := oX div 6;
+
+                    // Powers of X with exact order 6 can only be X^(baseExp*m)
+                    // with gcd(m,6)=1, so m=1 or 5.
+                    for m in [1,5] do
+
+                        n := baseExp * m;
+
+                        if n mod 6 eq 1 then
+
+                            Y := X^n;
+                            powerCandidatesTested +:= 1;
+
+                            print "  Testing power n =", n, "where n mod 6 =", n mod 6;
+                            print "    Order(Y) =", Order(Y);
+                            print "    A*Y = Y*B ?", A*Y eq Y*B;
+                            print "    Trace profile Y =", TraceProfileMat26(Y);
+
+                            if A*Y eq Y*B and Order(Y) eq 6 and TraceProfileMat26(Y) eq [1,-1,-2] then
+
+                                print "";
+                                print "SUCCESS: found GL f-like order-6 power!";
+                                print "Y^-1*g*Y = g^10 ?", Y^-1*A*Y eq B;
+                                print "Order(Y) =", Order(Y);
+                                print "Trace profile [Y,Y^2,Y^3] =", TraceProfileMat26(Y);
+
+                                fGL5A := Y;
+                                goodPowerCount +:= 1;
+                                break;
+                            end if;
+                        end if;
+                    end for;
+                end if;
+            end if;
+        end if;
+    end if;
+
+    if goodPowerCount gt 0 then
+        break;
+    end if;
+
+    if trial mod 500 eq 0 then
+        print "  samples =", trial,
+              " invertible =", invertibleCount,
+              " targetTrace =", targetTraceCount,
+              " orderTests =", orderTests,
+              " powerCandidates =", powerCandidatesTested;
+    end if;
+
+    if orderTests ge maxOrderTests5A and targetTraceCount ge maxOrderTests5A then
+        print "";
+        print "Reached maxOrderTests5A =", maxOrderTests5A;
+        break;
+    end if;
+
+end for;
+
+print "";
+print "STEP 5A SUMMARY:";
+print "Samples =", sampleCount;
+print "Invertible transporters =", invertibleCount;
+print "Target-trace transporters =", targetTraceCount;
+print "Target-trace order tests =", orderTests;
+print "Power candidates tested =", powerCandidatesTested;
+print "Good GL order-6 powers found =", goodPowerCount;
+
+if goodPowerCount gt 0 then
+    print "";
+    print "STEP 5A RESULT:";
+    print "We found fGL5A in GL26 with:";
+    print "  fGL5A^-1*g*fGL5A = g^10";
+    print "  Order(fGL5A)=6";
+    print "  Trace profile [1,-1,-2]";
+    print "Next step: test whether it preserves F4 structure / invariant forms.";
+else
+    print "";
+    print "STEP 5A RESULT:";
+    print "No order-6 power was found from the tested target-trace transporters.";
+    print "Then random GL transporters are probably not enough.";
+    print "Next step should impose extra structure, for example invariant bilinear/cubic form constraints.";
+end if;
