@@ -1,0 +1,440 @@
+print "============================================================";
+print "NOTES-LINE MAGMA RUN: GENUINE F4(7), FIX g, SEARCH GENUINE f";
+print "No E/Hermitian correction. No artificial GL f.";
+print "============================================================";
+
+SetSeed(13013);
+
+FF := GF(7);
+G := ChevalleyGroup("F",4,FF);
+genList := [ x : x in Generators(G) ];
+
+print "Degree(G) =", Degree(G);
+print "Number of generators =", #genList;
+
+// ============================================================
+// Helpers
+// ============================================================
+
+function SInt(x)
+    z := Integers()!x;
+    if z gt 3 then z -:= 7; end if;
+    return z;
+end function;
+
+function TraceProfile(M)
+    return [ SInt(Trace(M)), SInt(Trace(M^2)), SInt(Trace(M^3)) ];
+end function;
+
+function ExactOrderMat(M,m)
+    I := IdentityMatrix(BaseRing(M),Nrows(M));
+    if M^m ne I then return false; end if;
+    for d in Divisors(m) do
+        if d lt m and M^d eq I then
+            return false;
+        end if;
+    end for;
+    return true;
+end function;
+
+function ActionExponent(A,F)
+    // We use the convention F^-1*A*F = A^k.
+    C := F^-1*A*F;
+    for k in [1..12] do
+        if C eq A^k then
+            return k;
+        end if;
+    end for;
+    return 0;
+end function;
+
+function ActionExponentOther(A,F)
+    // Also test the opposite convention F*A*F^-1 = A^k.
+    C := F*A*F^-1;
+    for k in [1..12] do
+        if C eq A^k then
+            return k;
+        end if;
+    end for;
+    return 0;
+end function;
+
+function NormalFormCount(A,F)
+    S := {};
+    for i in [0..12] do
+        for j in [0..5] do
+            Include(~S,A^i*F^j);
+        end for;
+    end for;
+    return #S;
+end function;
+
+// ============================================================
+// STEP 1: Find genuine g of order 13, trace 0
+// ============================================================
+
+print "============================================================";
+print "STEP 1: Find genuine order-13 trace-zero g in F4(7)";
+print "============================================================";
+
+g := false;
+gTrial := 0;
+gOriginalOrder := 0;
+
+for trial in [1..500] do
+    x := Random(G);
+    ox := Order(x);
+
+    if ox mod 13 eq 0 then
+        y := x^(ox div 13);
+
+        if Order(y) eq 13 and Trace(Matrix(y)) eq FF!0 then
+            g := y;
+            gTrial := trial;
+            gOriginalOrder := ox;
+            break;
+        end if;
+    end if;
+end for;
+
+if Type(g) eq BoolElt then
+    error "No genuine order-13 trace-zero g found.";
+end if;
+
+A := Matrix(g);
+n := Nrows(A);
+I26 := IdentityMatrix(FF,n);
+
+print "Found g at trial", gTrial;
+print "Original random order =", gOriginalOrder;
+print "Order(g) =", Order(g);
+print "Trace(g) =", SInt(Trace(A));
+print "Trace(g^i), i=1..12 =", [ SInt(Trace(A^i)) : i in [1..12] ];
+
+P<x> := PolynomialRing(FF);
+charA := CharacteristicPolynomial(A);
+minA := MinimalPolynomial(A);
+
+print "charpoly(g) =", charA;
+print "minpoly(g) =", minA;
+print "dim Fix(g) =", Dimension(Nullspace(A-I26));
+print "rank(g-I) =", Rank(A-I26);
+
+// ============================================================
+// STEP 2: Search genuine f in G, exactly as notes
+// f order 6, normalises <g>, not centralising, trace profile [1,-1,-2]
+// ============================================================
+
+print "============================================================";
+print "STEP 2: Search genuine f in G normalising <g>";
+print "Target on V26: TraceProfile(f) = [1,-1,-2]";
+print "This doubles to adjoint-style [2,-2,-4].";
+print "============================================================";
+
+targetProfile := [1,-1,-2];
+
+maxTrials := 20000;
+printEvery := 500;
+
+order6Count := 0;
+traceGoodCount := 0;
+normalisesCount := 0;
+targetExponentCount := 0;
+
+fGood := false;
+fGoodElt := false;
+expGood := 0;
+expOtherGood := 0;
+
+for trial in [1..maxTrials] do
+
+    x := Random(G);
+    ox := Order(x);
+
+    if ox mod 6 ne 0 then
+        continue;
+    end if;
+
+    // Test both powers of order 6: r=1 and r=5.
+    for r in [1,5] do
+
+        fCandElt := x^((ox div 6)*r);
+
+        if Order(fCandElt) ne 6 then
+            continue;
+        end if;
+
+        F := Matrix(fCandElt);
+
+        if not ExactOrderMat(F,6) then
+            continue;
+        end if;
+
+        order6Count +:= 1;
+
+        prof := TraceProfile(F);
+
+        if prof ne targetProfile then
+            continue;
+        end if;
+
+        traceGoodCount +:= 1;
+
+        exp1 := ActionExponent(A,F);
+        exp2 := ActionExponentOther(A,F);
+
+        if exp1 ne 0 or exp2 ne 0 then
+            normalisesCount +:= 1;
+
+            print "------------------------------------------------------------";
+            print "Normalising order-6 trace-good f found at trial", trial;
+            print "r =", r;
+            print "Trace profile =", prof;
+            print "Exponent convention F^-1*A*F = A^k:", exp1;
+            print "Exponent convention F*A*F^-1 = A^k:", exp2;
+            print "Normal form count =", NormalFormCount(A,F);
+            print "------------------------------------------------------------";
+        end if;
+
+        // We want exponent 10 or 4. If exponent 4, inverse gives exponent 10.
+        if exp1 in {10,4} then
+            targetExponentCount +:= 1;
+
+            if exp1 eq 10 then
+                fGoodElt := fCandElt;
+                fGood := F;
+                expGood := 10;
+            else
+                fGoodElt := fCandElt^-1;
+                fGood := F^-1;
+                expGood := 10;
+            end if;
+
+            expOtherGood := ActionExponentOther(A,fGood);
+            break trial;
+        end if;
+
+        if exp2 in {10,4} then
+            targetExponentCount +:= 1;
+
+            // Still store the matrix with our main convention F^-1*A*F = A^10 if possible.
+            if ActionExponent(A,F) eq 10 then
+                fGoodElt := fCandElt;
+                fGood := F;
+                expGood := 10;
+            elif ActionExponent(A,F^-1) eq 10 then
+                fGoodElt := fCandElt^-1;
+                fGood := F^-1;
+                expGood := 10;
+            else
+                fGoodElt := fCandElt;
+                fGood := F;
+                expGood := ActionExponent(A,F);
+            end if;
+
+            expOtherGood := ActionExponentOther(A,fGood);
+            break trial;
+        end if;
+
+    end for;
+
+    if trial mod printEvery eq 0 then
+        print "trial", trial,
+              "order6 tested", order6Count,
+              "trace-good", traceGoodCount,
+              "normalising", normalisesCount,
+              "target exp", targetExponentCount;
+    end if;
+
+end for;
+
+print "============================================================";
+print "STEP 2 SUMMARY";
+print "Random trials =", maxTrials;
+print "Order-6 candidates tested =", order6Count;
+print "Trace-profile-good candidates =", traceGoodCount;
+print "Normalising candidates =", normalisesCount;
+print "Target exponent candidates =", targetExponentCount;
+
+if Type(fGood) eq BoolElt then
+    print "RESULT: no genuine f found in this random notes-line search.";
+    print "This does NOT disprove existence.";
+    print "It means fixed-g random search in full F4(7) is too sparse in Magma Online.";
+    print "Next notes-line move would be a guided genuine normaliser search on HPC,";
+    print "or ask Alastair whether to compute N_G(<g>) by a more structural method.";
+    print "============================================================";
+else
+    print "RESULT: genuine f found.";
+    print "Order(f) =", Order(fGoodElt);
+    print "Matrix exact order 6?", ExactOrderMat(fGood,6);
+    print "Trace profile f =", TraceProfile(fGood);
+    print "Main exponent F^-1*A*F = A^k:", ActionExponent(A,fGood);
+    print "Other exponent F*A*F^-1 = A^k:", ActionExponentOther(A,fGood);
+    print "Normal form count |{g^i f^j}| =", NormalFormCount(A,fGood);
+    print "============================================================";
+
+    // ============================================================
+    // STEP 3: Extract 12+14 subspaces fixed/stable by g and f
+    // This follows the note: V26|H should be 12 + 14_a.
+    // We use the centraliser algebra of <g,f> on V26.
+    // ============================================================
+
+    print "============================================================";
+    print "STEP 3: Extract 12+14 stable subspaces from C_End(V)(g,f)";
+    print "============================================================";
+
+    function VecToMatCol(v,n)
+        return Matrix(FF,n,n,[ v[(j-1)*n+i] : i in [1..n], j in [1..n] ]);
+    end function;
+
+    function CommEquationRows(M)
+        rows := [];
+        n := Nrows(M);
+
+        for i in [1..n] do
+            for j in [1..n] do
+                coeffs := [ FF!0 : k in [1..n*n] ];
+
+                // X*M - M*X = 0, column-major variables X_{row,col}
+                for k in [1..n] do
+                    coeffs[(k-1)*n+i] +:= M[k,j];   // X_{i,k} M_{k,j}
+                    coeffs[(j-1)*n+k] -:= M[i,k];   // M_{i,k} X_{k,j}
+                end for;
+
+                Append(~rows, coeffs);
+            end for;
+        end for;
+
+        return rows;
+    end function;
+
+    rowsComm := CommEquationRows(A) cat CommEquationRows(fGood);
+    Lcomm := Matrix(FF,rowsComm);
+
+    print "Centraliser equation rank =", Rank(Lcomm);
+    print "Expected right-nullity =", Ncols(Lcomm)-Rank(Lcomm);
+
+    Kcomm := Nullspace(Transpose(Lcomm));
+    print "Centraliser basis dimension =", Dimension(Kcomm);
+
+    CommBasis := [];
+
+    for i in [1..Dimension(Kcomm)] do
+        C := VecToMatCol(Kcomm.i,n);
+        if C*A eq A*C and C*fGood eq fGood*C then
+            Append(~CommBasis,C);
+        end if;
+    end for;
+
+    print "Verified commuting basis elements =", #CommBasis;
+
+    function SpaceStable(W,M)
+        for i in [1..Dimension(W)] do
+            if not (W.i*M in W) then
+                return false;
+            end if;
+        end for;
+        return true;
+    end function;
+
+    function MatrixOnSubspace(W,M)
+        d := Dimension(W);
+        rows := [];
+
+        for i in [1..d] do
+            v := W.i*M;
+            coords := Coordinates(W,v);
+            Append(~rows,Eltseq(coords));
+        end for;
+
+        return Matrix(FF,d,d,&cat rows);
+    end function;
+
+    V12 := false;
+    V14 := false;
+    splitFound := false;
+
+    if #CommBasis lt 2 then
+        print "Centraliser dimension is too small to split 12+14 by this method.";
+    else
+        for attempt in [1..200] do
+            C := ZeroMatrix(FF,n,n);
+
+            for B in CommBasis do
+                C +:= Random(FF)*B;
+            end for;
+
+            eigs := [];
+
+            for lam in FF do
+                W := Nullspace(C - lam*I26);
+                d := Dimension(W);
+
+                if d gt 0 then
+                    Append(~eigs,<lam,d,W>);
+                end if;
+            end for;
+
+            dims := Sort([ e[2] : e in eigs ]);
+
+            if dims eq [12,14] then
+                for e in eigs do
+                    if e[2] eq 12 then
+                        V12 := e[3];
+                    elif e[2] eq 14 then
+                        V14 := e[3];
+                    end if;
+                end for;
+
+                if SpaceStable(V12,A) and SpaceStable(V12,fGood) and
+                   SpaceStable(V14,A) and SpaceStable(V14,fGood) then
+                    splitFound := true;
+                    print "12+14 split found at attempt", attempt;
+                    break;
+                end if;
+            end if;
+        end for;
+    end if;
+
+    if not splitFound then
+        print "RESULT: f found, but 12+14 split not extracted by centraliser eigenvalues.";
+        print "Next: use MeatAxe/composition factors for <g,f>.";
+    else
+        print "RESULT: extracted V12 and V14 stable under g and f.";
+        print "dim V12 =", Dimension(V12);
+        print "dim V14 =", Dimension(V14);
+        print "V12 stable under g,f?", SpaceStable(V12,A), SpaceStable(V12,fGood);
+        print "V14 stable under g,f?", SpaceStable(V14,A), SpaceStable(V14,fGood);
+
+        A12res := MatrixOnSubspace(V12,A);
+        F12res := MatrixOnSubspace(V12,fGood);
+        A14res := MatrixOnSubspace(V14,A);
+        F14res := MatrixOnSubspace(V14,fGood);
+
+        print "------------------------------------------------------------";
+        print "V12 restricted data";
+        print "Order(g12) =", Order(A12res);
+        print "Order(f12) =", Order(F12res);
+        print "Trace(g12), Trace(f12), Trace(f12^2), Trace(f12^3) =",
+              SInt(Trace(A12res)), SInt(Trace(F12res)),
+              SInt(Trace(F12res^2)), SInt(Trace(F12res^3));
+
+        print "------------------------------------------------------------";
+        print "V14 restricted data";
+        print "Order(g14) =", Order(A14res);
+        print "Order(f14) =", Order(F14res);
+        print "Trace(g14), Trace(f14), Trace(f14^2), Trace(f14^3) =",
+              SInt(Trace(A14res)), SInt(Trace(F14res)),
+              SInt(Trace(F14res^2)), SInt(Trace(F14res^3));
+
+        print "------------------------------------------------------------";
+        print "Expected notes-line comparison:";
+        print "V12 should look like trace [g,f,f^2,f^3] = [-1,0,0,0].";
+        print "V14 should look like trace [g,f,f^2,f^3] = [1,1,-1,-2].";
+        print "If this matches, next step is to search t12,t14 inside GL12 and GL14.";
+    end if;
+
+    print "============================================================";
+    print "END OF NOTES-LINE RUN";
+    print "============================================================";
+end if;
