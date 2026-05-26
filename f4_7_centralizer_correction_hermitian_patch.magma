@@ -1,0 +1,1347 @@
+///////////////////////////////////////////////////////////////////////////
+// FRESH ALL-IN-ONE: F4(7), g, S, 2+12+12, Sigma24,
+// centralizer/Hermitian correction for Y24
+///////////////////////////////////////////////////////////////////////////
+
+SetSeed(1);
+
+FF := GF(7);
+SCALAR_TWIST_CAP := 200;   // strict cap; increase only if diagnostics look good
+
+print "============================================================";
+print "FRESH CENTRALIZER-CORRECTION TEST FOR F4(7)";
+print "============================================================";
+
+///////////////////////////////////////////////////////////////////////////
+// Basic helpers
+///////////////////////////////////////////////////////////////////////////
+
+function SignedFF(a)
+    x := Integers()!(FF!a);
+    if x gt 3 then
+        return x - 7;
+    else
+        return x;
+    end if;
+end function;
+
+function SignedTrace(M)
+    return SignedFF(Trace(M));
+end function;
+
+function TraceProfile3(M)
+    return [SignedTrace(M), SignedTrace(M^2), SignedTrace(M^3)];
+end function;
+
+function VecMat(M)
+    return &cat[[M[i,j] : j in [1..Ncols(M)]] : i in [1..Nrows(M)]];
+end function;
+
+function MatFromVec(v, r, c, F)
+    return Matrix(F, r, c, [v[k] : k in [1..r*c]]);
+end function;
+
+function MatrixFromRows(rows, n, F)
+    return Matrix(F, #rows, n, &cat[[rows[i][j] : j in [1..n]] : i in [1..#rows]]);
+end function;
+
+function RankOfRows(rows, n, F)
+    if #rows eq 0 then
+        return 0;
+    end if;
+    return Rank(MatrixFromRows(rows, n, F));
+end function;
+
+function MatEquationBasis(L, R)
+    // Solve L*X = X*R for row-vector convention.
+    F := BaseRing(L);
+    n := Nrows(L);
+    rows := [];
+
+    for a in [1..n] do
+        for b in [1..n] do
+            coeff := [F!0 : k in [1..n*n]];
+
+            // coefficient of (L*X)[a,b]
+            for i in [1..n] do
+                idx := (i-1)*n + b;
+                coeff[idx] +:= L[a,i];
+            end for;
+
+            // coefficient of -(X*R)[a,b]
+            for j in [1..n] do
+                idx := (a-1)*n + j;
+                coeff[idx] -:= R[j,b];
+            end for;
+
+            Append(~rows, coeff);
+        end for;
+    end for;
+
+    Eq := Matrix(F, #rows, n*n, &cat rows);
+
+    // Magma Nullspace uses row convention, so use Transpose(Eq)
+    return Nullspace(Transpose(Eq));
+end function;
+
+function InvariantBilinearForm(gensM)
+    F := BaseRing(gensM[1]);
+    n := Nrows(gensM[1]);
+    rows := [];
+
+    for X in gensM do
+        for a in [1..n] do
+            for b in [1..n] do
+                coeff := [F!0 : k in [1..n*n]];
+
+                // (X*S*X^T)[a,b]
+                for i in [1..n] do
+                    for j in [1..n] do
+                        idx := (i-1)*n + j;
+                        coeff[idx] +:= X[a,i]*X[b,j];
+                    end for;
+                end for;
+
+                // -S[a,b]
+                coeff[(a-1)*n + b] -:= F!1;
+
+                Append(~rows, coeff);
+            end for;
+        end for;
+    end for;
+
+    Eq := Matrix(F, #rows, n*n, &cat rows);
+    NS := Nullspace(Transpose(Eq));
+
+    bestRank := -1;
+    bestS := ZeroMatrix(F,n,n);
+
+    for v in Basis(NS) do
+        S := MatFromVec(v,n,n,F);
+        r := Rank(S);
+        if r gt bestRank then
+            bestRank := r;
+            bestS := S;
+        end if;
+    end for;
+
+    return NS, bestS;
+end function;
+
+function CyclicRows(v, A, d)
+    return [v*(A^i) : i in [0..d-1]];
+end function;
+
+///////////////////////////////////////////////////////////////////////////
+// STEP 1: Build genuine F4(7)
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 1: Build G = ChevalleyGroup(\"F\",4,GF(7))";
+
+G := ChevalleyGroup("F",4,FF);
+n := Degree(G);
+
+print "Degree =", n;
+print "BaseRing =", BaseRing(Matrix(G.1));
+print "Ngens =", Ngens(G);
+print "Order factorisation =", Factorisation(Order(G));
+
+gensM := [Matrix(G.i) : i in [1..Ngens(G)]];
+I26 := IdentityMatrix(FF,26);
+
+///////////////////////////////////////////////////////////////////////////
+// STEP 2: Find genuine order-13 trace-zero g
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 2: Find order-13 trace-zero g";
+
+foundg := false;
+
+for trial in [1..300] do
+    r := Random(G);
+    o := Order(r);
+
+    if o mod 13 eq 0 then
+        cand := r^(o div 13);
+        A := Matrix(cand);
+
+        if Order(cand) eq 13 and Trace(A) eq FF!0 then
+            g := cand;
+            foundg := true;
+            print "Found g at trial", trial;
+            print "Original random order =", o;
+            break;
+        end if;
+    end if;
+end for;
+
+if not foundg then
+    error "No order-13 trace-zero g found within trial cap.";
+end if;
+
+A := Matrix(g);
+
+print "Order(g) =", Order(g);
+print "Trace(g) =", SignedTrace(A);
+print "Trace(g^i), i=1..12 =", [SignedTrace(A^i) : i in [1..12]];
+print "Characteristic polynomial factorisation =";
+print Factorisation(CharacteristicPolynomial(A));
+print "Minimal polynomial =";
+print MinimalPolynomial(A);
+
+///////////////////////////////////////////////////////////////////////////
+// STEP 3: Recover genuine F4 bilinear form Sbest
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 3: Recover invariant bilinear form Sbest";
+
+NSform, Sbest := InvariantBilinearForm(gensM);
+
+print "Bilinear form space dimension =", Dimension(NSform);
+print "Rank(Sbest) =", Rank(Sbest);
+print "Sbest symmetric?", Sbest eq Transpose(Sbest);
+
+for i in [1..#gensM] do
+    print "Generator", i, "preserves Sbest?",
+          gensM[i]*Sbest*Transpose(gensM[i]) eq Sbest;
+end for;
+
+print "g preserves Sbest?", A*Sbest*Transpose(A) eq Sbest;
+
+///////////////////////////////////////////////////////////////////////////
+// STEP 4: Build adapted basis 2 + 12 + 12
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 4: Build adapted row basis V26 = 2 + 12 + 12";
+
+Vfix := Nullspace(A - I26);
+Wnon := RowSpace(A - I26);
+
+print "Fixed space dimension =", Dimension(Vfix);
+print "RowSpace(A-I) dimension =", Dimension(Wnon);
+
+if Dimension(Vfix) ne 2 then
+    error "Fixed space dimension is not 2.";
+end if;
+
+if Dimension(Wnon) ne 24 then
+    error "Non-fixed row space dimension is not 24.";
+end if;
+
+fixedRows := Basis(Vfix);
+
+foundCyc1 := false;
+for trial in [1..500] do
+    v := Random(Wnon);
+    rows1 := CyclicRows(v,A,12);
+    if RankOfRows(rows1,26,FF) eq 12 then
+        foundCyc1 := true;
+        break;
+    end if;
+end for;
+
+if not foundCyc1 then
+    error "Could not find first 12-dimensional cyclic block.";
+end if;
+
+foundCyc2 := false;
+for trial in [1..1000] do
+    v := Random(Wnon);
+    rows2 := CyclicRows(v,A,12);
+    if RankOfRows(rows2,26,FF) eq 12 then
+        allRowsTest := fixedRows cat rows1 cat rows2;
+        if RankOfRows(allRowsTest,26,FF) eq 26 then
+            foundCyc2 := true;
+            break;
+        end if;
+    end if;
+end for;
+
+if not foundCyc2 then
+    error "Could not find second independent 12-dimensional cyclic block.";
+end if;
+
+Tadapt := MatrixFromRows(fixedRows cat rows1 cat rows2,26,FF);
+print "Rank(Tadapt) =", Rank(Tadapt);
+
+Aad := Tadapt*A*Tadapt^-1;
+Sad := Tadapt*Sbest*Transpose(Tadapt);
+
+S00 := Submatrix(Sad,1,1,2,2);
+S24 := Submatrix(Sad,3,3,24,24);
+
+A00 := Submatrix(Aad,1,1,2,2);
+A12a := Submatrix(Aad,3,3,12,12);
+A12b := Submatrix(Aad,15,15,12,12);
+A24 := Submatrix(Aad,3,3,24,24);
+
+print "A00 = I2?", A00 eq IdentityMatrix(FF,2);
+print "A12a order-13?", A12a^13 eq IdentityMatrix(FF,12) and A12a ne IdentityMatrix(FF,12);
+print "A12b order-13?", A12b^13 eq IdentityMatrix(FF,12) and A12b ne IdentityMatrix(FF,12);
+print "A12a eq A12b?", A12a eq A12b;
+
+print "Rank(S00) =", Rank(S00);
+print "Rank(S24) =", Rank(S24);
+print "Fixed/nonfixed cross ranks:",
+      Rank(Submatrix(Sad,1,3,2,24)),
+      Rank(Submatrix(Sad,3,1,24,2));
+
+if A12a ne A12b then
+    error "The two 12-blocks are not identical in this adapted basis. Rerun with a fresh random seed.";
+end if;
+
+A12 := A12a;
+I12 := IdentityMatrix(FF,12);
+I24 := IdentityMatrix(FF,24);
+
+///////////////////////////////////////////////////////////////////////////
+// STEP 5: Build Sigma12 and Sigma24 with A*Sigma = Sigma*A^10
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 5: Build Sigma24 for exponent 10";
+
+Tspace12 := MatEquationBasis(A12, A12^10);
+print "dim transporter space A12 -> A12^10 =", Dimension(Tspace12);
+
+foundSigma := false;
+
+for v in Basis(Tspace12) do
+    X := MatFromVec(v,12,12,FF);
+
+    if Determinant(X) ne 0 then
+        for c in FF do
+            if c ne FF!0 then
+                Xc := c*X;
+                rel := A12*Xc eq Xc*(A12^10);
+                ord6 := Xc^6 eq I12 and Xc^3 ne I12 and Xc^2 ne I12;
+                tp := TraceProfile3(Xc);
+
+                if rel and ord6 and tp eq [0,0,0] then
+                    Sigma12 := Xc;
+                    foundSigma := true;
+                    break;
+                end if;
+            end if;
+        end for;
+    end if;
+
+    if foundSigma then
+        break;
+    end if;
+end for;
+
+if not foundSigma then
+    error "No good Sigma12 found.";
+end if;
+
+Sigma24 := DiagonalJoin(Sigma12,Sigma12);
+
+print "Sigma24 relation A24*Sigma24 = Sigma24*A24^10?",
+      A24*Sigma24 eq Sigma24*(A24^10);
+print "Sigma24 exact order 6?",
+      Sigma24^6 eq I24 and Sigma24^3 ne I24 and Sigma24^2 ne I24;
+print "Sigma24 trace profile =", TraceProfile3(Sigma24);
+print "Sigma24 preserves S24?",
+      Sigma24*S24*Transpose(Sigma24) eq S24;
+
+Ssrc24 := Sigma24*S24*Transpose(Sigma24);
+
+print "Rank(Ssrc24) =", Rank(Ssrc24);
+print "Ssrc24 A24-invariant?",
+      A24*Ssrc24*Transpose(A24) eq Ssrc24;
+
+///////////////////////////////////////////////////////////////////////////
+// STEP 6: Centralizer diagnostics over GF(7)
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 6: GF(7) centralizer diagnostics";
+
+CentA24 := MatEquationBasis(A24,A24);
+print "dim C_GL/A-algebra centralizer of A24 =", Dimension(CentA24);
+print "Expected dimension for two copies of 12D irreducible = 48";
+
+///////////////////////////////////////////////////////////////////////////
+// STEP 7: Build E = GF(7^12) and recover 2x2 Hermitian forms
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 7: Recover E-Hermitian 2x2 forms from S24 and Ssrc24";
+
+P<x> := PolynomialRing(FF);
+Phi13 := &+[x^i : i in [0..12]];
+E<lam> := ext<FF | Phi13>;
+
+q0 := 7^6;   // fixed field size for inverse involution
+qE := 7^12;
+
+function Rho(z)
+    return z^q0;   // lam -> lam^-1
+end function;
+
+function TraceEF(z)
+    s := E!0;
+    for i in [0..11] do
+        s +:= z^(7^i);
+    end for;
+    return FF!s;
+end function;
+
+function MakeFormBasis(variant)
+    FB := [];
+
+    for k in [0..11] do
+        h := lam^k;
+        M := ZeroMatrix(FF,12,12);
+
+        for i in [1..12] do
+            for j in [1..12] do
+                bi := lam^(i-1);
+                bj := lam^(j-1);
+
+                if variant eq 1 then
+                    val := TraceEF(bi*h*Rho(bj));
+                elif variant eq 2 then
+                    val := TraceEF(Rho(bi)*h*bj);
+                elif variant eq 3 then
+                    val := TraceEF(bj*h*Rho(bi));
+                else
+                    val := TraceEF(Rho(bj)*h*bi);
+                end if;
+
+                M[i,j] := val;
+            end for;
+        end for;
+
+        Append(~FB,M);
+    end for;
+
+    return FB;
+end function;
+
+function RecoverBlock(B, FBasis)
+    Mspan := Matrix(FF,12,144,&cat[VecMat(FBasis[k]) : k in [1..12]]);
+    Vspan := RowSpace(Mspan);
+    bvec := Vector(FF,VecMat(B));
+
+    if not (bvec in Vspan) then
+        return false, E!0, ZeroMatrix(FF,12,12);
+    end if;
+
+    c := Solution(Mspan,bvec);
+
+    h := E!0;
+    rec := ZeroMatrix(FF,12,12);
+
+    for k in [1..12] do
+        h +:= E!c[k]*lam^(k-1);
+        rec +:= c[k]*FBasis[k];
+    end for;
+
+    return rec eq B, h, rec;
+end function;
+
+testBlocks := [
+    Submatrix(S24,1,1,12,12),
+    Submatrix(S24,1,13,12,12),
+    Submatrix(S24,13,1,12,12),
+    Submatrix(S24,13,13,12,12),
+    Submatrix(Ssrc24,1,1,12,12),
+    Submatrix(Ssrc24,1,13,12,12),
+    Submatrix(Ssrc24,13,1,12,12),
+    Submatrix(Ssrc24,13,13,12,12)
+];
+
+chosenVariant := 0;
+
+for variant in [1..4] do
+    FB := MakeFormBasis(variant);
+    okVariant := true;
+
+    for B in testBlocks do
+        okB, hB, recB := RecoverBlock(B,FB);
+        if not okB then
+            okVariant := false;
+            break;
+        end if;
+    end for;
+
+    print "Trace-form variant", variant, "works?", okVariant;
+
+    if okVariant then
+        chosenVariant := variant;
+        FBasis := FB;
+        break;
+    end if;
+end for;
+
+if chosenVariant eq 0 then
+    error "No trace-form variant recovered all S24/Ssrc24 blocks.";
+end if;
+
+print "Chosen trace-form variant =", chosenVariant;
+
+function RecoverH(Smat, FBasis)
+    H := ZeroMatrix(E,2,2);
+
+    for i in [1..2] do
+        for j in [1..2] do
+            B := Submatrix(Smat,1+(i-1)*12,1+(j-1)*12,12,12);
+            okB, hB, recB := RecoverBlock(B,FBasis);
+
+            if not okB then
+                error "RecoverH failed on a block.";
+            end if;
+
+            H[i,j] := hB;
+        end for;
+    end for;
+
+    return H;
+end function;
+
+function FormBlockFromE(h, FBasis)
+    coeffs := Eltseq(h);
+    M := ZeroMatrix(FF,12,12);
+
+    for k in [1..#coeffs] do
+        M +:= FF!coeffs[k]*FBasis[k];
+    end for;
+
+    return M;
+end function;
+
+function GF24FromH(H, FBasis)
+    B11 := FormBlockFromE(H[1,1],FBasis);
+    B12 := FormBlockFromE(H[1,2],FBasis);
+    B21 := FormBlockFromE(H[2,1],FBasis);
+    B22 := FormBlockFromE(H[2,2],FBasis);
+
+    return BlockMatrix(2,2,[B11,B12,B21,B22]);
+end function;
+
+function IsHermitian2(H)
+    for i in [1..2] do
+        for j in [1..2] do
+            if H[i,j] ne Rho(H[j,i]) then
+                return false;
+            end if;
+        end for;
+    end for;
+
+    return true;
+end function;
+
+Htarget := RecoverH(S24,FBasis);
+Hsource := RecoverH(Ssrc24,FBasis);
+
+print "Htarget Hermitian?", IsHermitian2(Htarget);
+print "Hsource Hermitian?", IsHermitian2(Hsource);
+print "det(Htarget) nonzero?", Determinant(Htarget) ne E!0;
+print "det(Hsource) nonzero?", Determinant(Hsource) ne E!0;
+print "Recover S24 from Htarget?", GF24FromH(Htarget,FBasis) eq S24;
+print "Recover Ssrc24 from Hsource?", GF24FromH(Hsource,FBasis) eq Ssrc24;
+
+///////////////////////////////////////////////////////////////////////////
+// STEP 8: Deterministic Hermitian congruence solve over E
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 8: Solve U_E * Hsource * rho(U_E)^T = Htarget";
+
+function RhoTranspose(M)
+    r := Nrows(M);
+    c := Ncols(M);
+
+    return Matrix(E,c,r,[Rho(M[j,i]) : i in [1..c], j in [1..r]]);
+end function;
+
+function HEval(x,y,H)
+    return x[1]*H[1,1]*Rho(y[1])
+         + x[1]*H[1,2]*Rho(y[2])
+         + x[2]*H[2,1]*Rho(y[1])
+         + x[2]*H[2,2]*Rho(y[2]);
+end function;
+
+function NormPreimage(a)
+    // Solve c*Rho(c)=a for nonzero fixed-field a.
+    if a eq E!0 then
+        return E!0;
+    end if;
+
+    z := PrimitiveElement(E);
+    nz := z^(q0+1);
+
+    cur := E!1;
+    for k in [0..q0-2] do
+        if cur eq a then
+            return z^k;
+        end if;
+        cur *:= nz;
+    end for;
+
+    error "NormPreimage failed.";
+end function;
+
+function HermitianNormalizer2(H)
+    cands := [];
+    Append(~cands,Vector(E,[E!1,E!0]));
+    Append(~cands,Vector(E,[E!0,E!1]));
+
+    for k in [0..11] do
+        Append(~cands,Vector(E,[E!1,lam^k]));
+    end for;
+
+    for c in FF do
+        Append(~cands,Vector(E,[E!1,E!c]));
+    end for;
+
+    found1 := false;
+
+    for v in cands do
+        h := HEval(v,v,H);
+
+        if h ne E!0 then
+            s := NormPreimage(1/h);
+            v1 := s*v;
+            found1 := true;
+            break;
+        end if;
+    end for;
+
+    if not found1 then
+        error "Could not find first non-isotropic vector.";
+    end if;
+
+    found2 := false;
+
+    for w in cands do
+        Mtest := Matrix(E,2,2,[v1[1],v1[2],w[1],w[2]]);
+
+        if Rank(Mtest) eq 2 then
+            a := HEval(w,v1,H);
+            v2 := w - a*v1;
+            h2 := HEval(v2,v2,H);
+
+            if h2 ne E!0 then
+                s2 := NormPreimage(1/h2);
+                v2 := s2*v2;
+                found2 := true;
+                break;
+            end if;
+        end if;
+    end for;
+
+    if not found2 then
+        error "Could not find second orthogonal non-isotropic vector.";
+    end if;
+
+    Pnorm := Matrix(E,2,2,[v1[1],v1[2],v2[1],v2[2]]);
+
+    if Pnorm*H*RhoTranspose(Pnorm) ne IdentityMatrix(E,2) then
+        error "Hermitian normalisation failed.";
+    end if;
+
+    return Pnorm;
+end function;
+
+Ptarget := HermitianNormalizer2(Htarget);
+Psource := HermitianNormalizer2(Hsource);
+
+print "Ptarget normalises Htarget to I?",
+      Ptarget*Htarget*RhoTranspose(Ptarget) eq IdentityMatrix(E,2);
+print "Psource normalises Hsource to I?",
+      Psource*Hsource*RhoTranspose(Psource) eq IdentityMatrix(E,2);
+
+UE := Ptarget^-1 * Psource;
+
+print "E-level congruence works?",
+      UE*Hsource*RhoTranspose(UE) eq Htarget;
+
+///////////////////////////////////////////////////////////////////////////
+// STEP 9: Convert U_E back to GF(7), form Y24 = U24*Sigma24
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 9: Convert U_E to GF(7) centralizer element U24";
+
+function EToCentBlock(h,A12)
+    coeffs := Eltseq(h);
+    M := ZeroMatrix(FF,12,12);
+    Apow := IdentityMatrix(FF,12);
+
+    for k in [1..12] do
+        if k le #coeffs then
+            M +:= FF!coeffs[k]*Apow;
+        end if;
+        Apow *:= A12;
+    end for;
+
+    return M;
+end function;
+
+function EMat2ToGF24(ME,A12)
+    B11 := EToCentBlock(ME[1,1],A12);
+    B12 := EToCentBlock(ME[1,2],A12);
+    B21 := EToCentBlock(ME[2,1],A12);
+    B22 := EToCentBlock(ME[2,2],A12);
+
+    return BlockMatrix(2,2,[B11,B12,B21,B22]);
+end function;
+
+function ScalarCentralizer24(d,A12)
+    B := EToCentBlock(d,A12);
+    return DiagonalJoin(B,B);
+end function;
+
+function TestY24(Y,A24,S24)
+    rel := A24*Y eq Y*(A24^10);
+    form := Y*S24*Transpose(Y) eq S24;
+    ord6 := Y^6 eq IdentityMatrix(FF,24)
+            and Y^3 ne IdentityMatrix(FF,24)
+            and Y^2 ne IdentityMatrix(FF,24);
+    tp := TraceProfile3(Y);
+
+    return rel, form, ord6, tp;
+end function;
+
+U24 := EMat2ToGF24(UE,A12);
+
+print "U24 centralises A24?", A24*U24 eq U24*A24;
+print "U24 sends Ssrc24 to S24?",
+      U24*Ssrc24*Transpose(U24) eq S24;
+
+Ybase := U24*Sigma24;
+rel, form, ord6, tp := TestY24(Ybase,A24,S24);
+
+print "Base Y24 checks:";
+print "  relation =", rel;
+print "  form     =", form;
+print "  exact6   =", ord6;
+print "  traces   =", tp;
+
+Yfound := false;
+Y24 := ZeroMatrix(FF,24,24);
+
+if rel and form and ord6 and tp eq [0,0,0] then
+    Y24 := Ybase;
+    Yfound := true;
+    print "Y24 FOUND with base Hermitian correction.";
+else
+    print "Base correction did not finish the order/trace condition.";
+    print "Trying small norm-one scalar twists, capped at", SCALAR_TWIST_CAP;
+
+    eta := PrimitiveElement(E)^(q0-1);  // norm-one generator candidate
+
+    for m in [0..SCALAR_TWIST_CAP] do
+        d := eta^m;
+
+        if d*Rho(d) eq E!1 then
+            Wd := ScalarCentralizer24(d,A12);
+            Ytry := U24*Wd*Sigma24;
+
+            rel2, form2, ord62, tp2 := TestY24(Ytry,A24,S24);
+
+            if m mod 50 eq 0 then
+                print "  twist", m, "rel/form/exact6/traces =",
+                      rel2, form2, ord62, tp2;
+            end if;
+
+            if rel2 and form2 and ord62 and tp2 eq [0,0,0] then
+                Y24 := Ytry;
+                Yfound := true;
+                print "Y24 FOUND with scalar twist m =", m;
+                break;
+            end if;
+        end if;
+    end for;
+end if;
+
+if not Yfound then
+    print "";
+    print "============================================================";
+    print "NO Y24 FOUND WITH THE DETERMINISTIC CORRECTION + TWIST CAP";
+    print "Important diagnostics:";
+    print "  centralizer dimension =", Dimension(CentA24);
+    print "  S24 rank =", Rank(S24);
+    print "  Ssrc24 rank =", Rank(Ssrc24);
+    print "  E-level congruence worked?",
+          UE*Hsource*RhoTranspose(UE) eq Htarget;
+    print "  GF U24 congruence worked?",
+          U24*Ssrc24*Transpose(U24) eq S24;
+    print "Interpretation:";
+    print "  If E/GF congruence is true, the form obstruction is solved.";
+    print "  Remaining obstruction is order-6/trace orientation in the coset U*Sigma.";
+    print "  Next small test would be a larger norm-one scalar cap or changing Sigma orientation.";
+    print "============================================================";
+    quit;
+end if;
+
+///////////////////////////////////////////////////////////////////////////
+// STEP 10: Find fixed 2D block F2 and assemble full fSeed
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 10: Find F2 and assemble full 26D fSeed";
+
+I2 := IdentityMatrix(FF,2);
+F2found := false;
+
+for a in FF do
+for b in FF do
+for c in FF do
+for d in FF do
+    M := Matrix(FF,2,2,[a,b,c,d]);
+
+    if Determinant(M) ne FF!0 then
+        form2 := M*S00*Transpose(M) eq S00;
+        ord2 := M^6 eq I2 and M^3 ne I2 and M^2 ne I2;
+        tp2 := TraceProfile3(M);
+
+        if form2 and ord2 and tp2 eq [1,-1,-2] then
+            F2 := M;
+            F2found := true;
+            break;
+        end if;
+    end if;
+end for;
+if F2found then break; end if;
+end for;
+if F2found then break; end if;
+end for;
+if F2found then break; end if;
+end for;
+
+if not F2found then
+    error "No F2 block found.";
+end if;
+
+print "F2 found:";
+print F2;
+print "F2 trace profile =", TraceProfile3(F2);
+print "F2 preserves S00?", F2*S00*Transpose(F2) eq S00;
+
+Fadapt := DiagonalJoin(F2,Y24);
+fSeed := Tadapt^-1 * Fadapt * Tadapt;
+
+print "";
+print "FULL fSeed GL26 CHECKS";
+print "A*fSeed = fSeed*A^10?", A*fSeed eq fSeed*(A^10);
+print "Equivalent fSeed^-1*A*fSeed = A^10?", fSeed^-1*A*fSeed eq A^10;
+print "fSeed exact order 6?",
+      fSeed^6 eq I26 and fSeed^3 ne I26 and fSeed^2 ne I26;
+print "Trace profile fSeed =", TraceProfile3(fSeed);
+print "fSeed preserves Sbest?",
+      fSeed*Sbest*Transpose(fSeed) eq Sbest;
+
+///////////////////////////////////////////////////////////////////////////
+// STEP 11: B=<g,f> normal forms
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 11: Check B normal forms g^i f^j";
+
+Blist := [];
+
+for i in [0..12] do
+    for j in [0..5] do
+        M := (A^i)*(fSeed^j);
+
+        isnew := true;
+        for N in Blist do
+            if M eq N then
+                isnew := false;
+                break;
+            end if;
+        end for;
+
+        if isnew then
+            Append(~Blist,M);
+        end if;
+    end for;
+end for;
+
+print "Number of distinct normal forms g^i f^j =", #Blist;
+
+print "";
+print "============================================================";
+print "FINAL STATUS";
+print "============================================================";
+print "Y24 relation/form/order/trace all passed.";
+print "fSeed is a GL26 candidate with:";
+print "  fSeed^-1*g*fSeed = g^10";
+print "  Order(fSeed)=6";
+print "  Trace profile [f,f^2,f^3] =", TraceProfile3(fSeed);
+print "  fSeed preserves the genuine F4 bilinear form";
+print "  |normal forms g^i f^j| =", #Blist;
+print "";
+print "Important: this script does not run direct F4 membership or cubic testing.";
+print "Next test: use your existing cubic-invariant random evaluator on fSeed.";
+print "If fSeed preserves the cubic too, it is the strong genuine F4-local f candidate.";
+print "============================================================";
+///////////////////////////////////////////////////////////////////////////
+// PATCH: robust Step 8 onwards
+// Assumes previous script already defined:
+// FF, E, lam, q0, Htarget, Hsource, A12, A24, S24, Ssrc24,
+// Sigma24, S00, Tadapt, Sbest, A, I26, TraceProfile3, SignedTrace
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "============================================================";
+print "PATCH STEP 8: ROBUST HERMITIAN CONGRUENCE + Y24 TEST";
+print "============================================================";
+
+I2 := IdentityMatrix(FF,2);
+I12 := IdentityMatrix(FF,12);
+I24 := IdentityMatrix(FF,24);
+I26 := IdentityMatrix(FF,26);
+
+SCALAR_TWIST_CAP := 300;
+
+///////////////////////////////////////////////////////////////////////////
+// Helpers
+///////////////////////////////////////////////////////////////////////////
+
+function Rho(z)
+    return z^(7^6);
+end function;
+
+function RhoTranspose(M)
+    r := Nrows(M);
+    c := Ncols(M);
+    return Matrix(BaseRing(M), c, r,
+        [Rho(M[j,i]) : i in [1..c], j in [1..r]]);
+end function;
+
+function HEval(x,y,H)
+    return x[1]*H[1,1]*Rho(y[1])
+         + x[1]*H[1,2]*Rho(y[2])
+         + x[2]*H[2,1]*Rho(y[1])
+         + x[2]*H[2,2]*Rho(y[2]);
+end function;
+
+function VScale(a,v)
+    return Vector(BaseRing(v), [a*v[i] : i in [1..Degree(v)]]);
+end function;
+
+function VSub(u,v)
+    return Vector(BaseRing(u), [u[i]-v[i] : i in [1..Degree(u)]]);
+end function;
+
+function RowMat2(v1,v2)
+    E0 := BaseRing(v1);
+    return Matrix(E0,2,2,[v1[1],v1[2],v2[1],v2[2]]);
+end function;
+
+function HasNormPreimage(a)
+    E0 := Parent(a);
+    q0local := 7^6;
+
+    if a eq E0!0 then
+        return true, E0!0;
+    end if;
+
+    // Norm image lies in fixed field.
+    if a^q0local ne a then
+        return false, E0!0;
+    end if;
+
+    z := PrimitiveElement(E0);
+    nz := z^(q0local+1);
+
+    cur := E0!1;
+    for k in [0..q0local-2] do
+        if cur eq a then
+            return true, z^k;
+        end if;
+        cur *:= nz;
+    end for;
+
+    return false, E0!0;
+end function;
+
+function CandidateVectors(E0,lam)
+    C := [];
+
+    Append(~C, Vector(E0,[E0!1,E0!0]));
+    Append(~C, Vector(E0,[E0!0,E0!1]));
+
+    for k in [0..11] do
+        Append(~C, Vector(E0,[E0!1,lam^k]));
+        Append(~C, Vector(E0,[lam^k,E0!1]));
+    end for;
+
+    for a in GF(7) do
+        for b in GF(7) do
+            if not (a eq 0 and b eq 0) then
+                Append(~C, Vector(E0,[E0!a,E0!b]));
+            end if;
+        end for;
+    end for;
+
+    return C;
+end function;
+
+function RobustHermitianNormalizer2(H,lam)
+    E0 := BaseRing(H);
+    C := CandidateVectors(E0,lam);
+    Id2E := IdentityMatrix(E0,2);
+
+    for v in C do
+        h := HEval(v,v,H);
+
+        if h ne E0!0 then
+            okNorm, s := HasNormPreimage(1/h);
+
+            if okNorm then
+                v1 := VScale(s,v);
+
+                if HEval(v1,v1,H) ne E0!1 then
+                    continue;
+                end if;
+
+                for w in C do
+                    if Rank(RowMat2(v1,w)) eq 2 then
+
+                        coeffs := [
+                            HEval(w,v1,H),
+                            Rho(HEval(v1,w,H)),
+                            HEval(v1,w,H),
+                            Rho(HEval(w,v1,H)),
+                            E0!0
+                        ];
+
+                        for c in coeffs do
+                            v2raw := VSub(w, VScale(c,v1));
+                            h2 := HEval(v2raw,v2raw,H);
+
+                            if h2 ne E0!0 then
+                                okNorm2, s2 := HasNormPreimage(1/h2);
+
+                                if okNorm2 then
+                                    v2 := VScale(s2,v2raw);
+                                    P := RowMat2(v1,v2);
+                                    chk := P*H*RhoTranspose(P);
+
+                                    if chk eq Id2E then
+                                        return true, P;
+                                    end if;
+                                end if;
+                            end if;
+                        end for;
+                    end if;
+                end for;
+            end if;
+        end if;
+    end for;
+
+    return false, ZeroMatrix(E0,2,2);
+end function;
+
+print "Htarget Hermitian?", Htarget[1,2] eq Rho(Htarget[2,1])
+                         and Htarget[1,1] eq Rho(Htarget[1,1])
+                         and Htarget[2,2] eq Rho(Htarget[2,2]);
+print "Hsource Hermitian?", Hsource[1,2] eq Rho(Hsource[2,1])
+                         and Hsource[1,1] eq Rho(Hsource[1,1])
+                         and Hsource[2,2] eq Rho(Hsource[2,2]);
+print "det(Htarget) nonzero?", Determinant(Htarget) ne E!0;
+print "det(Hsource) nonzero?", Determinant(Hsource) ne E!0;
+
+okT, Ptarget := RobustHermitianNormalizer2(Htarget,lam);
+okS, Psource := RobustHermitianNormalizer2(Hsource,lam);
+
+print "Ptarget found?", okT;
+print "Psource found?", okS;
+
+if not (okT and okS) then
+    print "STOP: robust Hermitian normalisation still failed.";
+    print "This means the previous E-level form convention is still not stable enough.";
+    quit;
+end if;
+
+print "Ptarget normalises Htarget?",
+      Ptarget*Htarget*RhoTranspose(Ptarget) eq IdentityMatrix(E,2);
+print "Psource normalises Hsource?",
+      Psource*Hsource*RhoTranspose(Psource) eq IdentityMatrix(E,2);
+
+UE := Ptarget^-1 * Psource;
+
+print "UE congruence check:",
+      UE*Hsource*RhoTranspose(UE) eq Htarget;
+
+///////////////////////////////////////////////////////////////////////////
+// Convert UE to GF(7). Try all possible lambda -> A12^r embeddings.
+///////////////////////////////////////////////////////////////////////////
+
+function EToCentBlockWithBase(h,Abase)
+    coeffs := Eltseq(E!h);
+
+    while #coeffs lt 12 do
+        Append(~coeffs, FF!0);
+    end while;
+
+    M := ZeroMatrix(FF,12,12);
+    Apow := IdentityMatrix(FF,12);
+
+    for k in [1..12] do
+        M +:= FF!coeffs[k]*Apow;
+        Apow *:= Abase;
+    end for;
+
+    return M;
+end function;
+
+function EMat2ToGF24WithBase(ME,Abase)
+    B11 := EToCentBlockWithBase(ME[1,1],Abase);
+    B12 := EToCentBlockWithBase(ME[1,2],Abase);
+    B21 := EToCentBlockWithBase(ME[2,1],Abase);
+    B22 := EToCentBlockWithBase(ME[2,2],Abase);
+
+    return BlockMatrix(2,2,[B11,B12,B21,B22]);
+end function;
+
+function ScalarCentralizer24WithBase(d,Abase)
+    B := EToCentBlockWithBase(d,Abase);
+    return DiagonalJoin(B,B);
+end function;
+
+function TestY24(Y,A24,S24)
+    rel := A24*Y eq Y*(A24^10);
+    form := Y*S24*Transpose(Y) eq S24;
+    inv := Determinant(Y) ne FF!0;
+    exact6 := inv and Y^6 eq IdentityMatrix(FF,24)
+              and Y^3 ne IdentityMatrix(FF,24)
+              and Y^2 ne IdentityMatrix(FF,24);
+    tp := TraceProfile3(Y);
+
+    return rel, form, inv, exact6, tp;
+end function;
+
+print "";
+print "Trying GF(7) conversion embeddings lambda -> A12^r";
+
+goodConv := false;
+goodR := 0;
+U24 := ZeroMatrix(FF,24,24);
+AbaseGood := A12;
+
+for r in [1..12] do
+    Abase := A12^r;
+
+    // Only use embeddings where Abase still has the right Phi13 structure.
+    if Abase^13 eq I12 and Abase ne I12 then
+        Utry := EMat2ToGF24WithBase(UE,Abase);
+
+        cent := A24*Utry eq Utry*A24;
+        cong := Utry*Ssrc24*Transpose(Utry) eq S24;
+        invU := Determinant(Utry) ne FF!0;
+
+        print "r =", r, "centralises?", cent, "congruence?", cong, "invertible?", invU;
+
+        if cent and cong and invU then
+            U24 := Utry;
+            AbaseGood := Abase;
+            goodR := r;
+            goodConv := true;
+            break;
+        end if;
+    end if;
+end for;
+
+if not goodConv then
+    print "STOP: E-level UE was found, but conversion back to GF(7) did not match S24.";
+    print "This is now a basis/convention issue, not a form-existence issue.";
+    quit;
+end if;
+
+print "Good conversion found with r =", goodR;
+
+///////////////////////////////////////////////////////////////////////////
+// Build Y24 = U24*Sigma24 and test.
+///////////////////////////////////////////////////////////////////////////
+
+Ybase := U24*Sigma24;
+rel, form, invY, exact6, tp := TestY24(Ybase,A24,S24);
+
+print "";
+print "Base Y24:";
+print "  relation =", rel;
+print "  form     =", form;
+print "  invertible =", invY;
+print "  exact6   =", exact6;
+print "  traces   =", tp;
+
+Yfound := false;
+Y24 := ZeroMatrix(FF,24,24);
+
+if rel and form and invY and exact6 and tp eq [0,0,0] then
+    Y24 := Ybase;
+    Yfound := true;
+    print "Y24 FOUND: base correction works.";
+else
+    print "Trying norm-one scalar twists, cap =", SCALAR_TWIST_CAP;
+
+    eta := PrimitiveElement(E)^(7^6-1);
+
+    for m in [0..SCALAR_TWIST_CAP] do
+        d := eta^m;
+
+        if d*Rho(d) eq E!1 then
+            Wd := ScalarCentralizer24WithBase(d,AbaseGood);
+            Ytry := U24*Wd*Sigma24;
+
+            rel2, form2, inv2, exact62, tp2 := TestY24(Ytry,A24,S24);
+
+            if m mod 50 eq 0 then
+                print "  m =", m, "rel/form/inv/exact6/tp =",
+                      rel2, form2, inv2, exact62, tp2;
+            end if;
+
+            if rel2 and form2 and inv2 and exact62 and tp2 eq [0,0,0] then
+                Y24 := Ytry;
+                Yfound := true;
+                print "Y24 FOUND with scalar twist m =", m;
+                break;
+            end if;
+        end if;
+    end for;
+end if;
+
+if not Yfound then
+    print "";
+    print "============================================================";
+    print "NO Y24 FOUND IN THIS PATCH";
+    print "But diagnostics are meaningful:";
+    print "  E-level Hermitian congruence worked.";
+    print "  GF conversion worked with r =", goodR;
+    print "  U24*Ssrc24*U24^T = S24:", U24*Ssrc24*Transpose(U24) eq S24;
+    print "  Base Y24 relation/form/inv/exact6/traces:",
+          rel, form, invY, exact6, tp;
+    print "Interpretation:";
+    print "  The form obstruction is solved.";
+    print "  The remaining issue is the order-6 representative in the coset C(A24)*Sigma24.";
+    print "============================================================";
+    quit;
+end if;
+
+///////////////////////////////////////////////////////////////////////////
+// Assemble full fSeed.
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "PATCH STEP 9: assemble fSeed";
+
+F2found := false;
+
+for a in FF do
+for b in FF do
+for c in FF do
+for d in FF do
+    M := Matrix(FF,2,2,[a,b,c,d]);
+
+    if Determinant(M) ne FF!0 then
+        if M*S00*Transpose(M) eq S00
+           and M^6 eq I2
+           and M^3 ne I2
+           and M^2 ne I2
+           and TraceProfile3(M) eq [1,-1,-2] then
+
+            F2 := M;
+            F2found := true;
+            break;
+        end if;
+    end if;
+end for;
+if F2found then break; end if;
+end for;
+if F2found then break; end if;
+end for;
+if F2found then break; end if;
+end for;
+
+if not F2found then
+    print "STOP: no fixed 2D block F2 found.";
+    quit;
+end if;
+
+print "F2 =";
+print F2;
+print "F2 trace profile =", TraceProfile3(F2);
+print "F2 preserves S00?", F2*S00*Transpose(F2) eq S00;
+
+Fadapt := DiagonalJoin(F2,Y24);
+fSeed := Tadapt^-1 * Fadapt * Tadapt;
+
+print "";
+print "FULL fSeed CHECKS";
+
+print "Determinant(fSeed) nonzero?", Determinant(fSeed) ne FF!0;
+
+if Determinant(fSeed) ne FF!0 then
+    print "A*fSeed = fSeed*A^10?", A*fSeed eq fSeed*(A^10);
+    print "fSeed^-1*A*fSeed = A^10?", fSeed^-1*A*fSeed eq A^10;
+    print "fSeed exact order 6?",
+          fSeed^6 eq I26 and fSeed^3 ne I26 and fSeed^2 ne I26;
+else
+    print "fSeed is singular, so inverse/order tests are invalid.";
+end if;
+
+print "Trace profile fSeed =", TraceProfile3(fSeed);
+print "fSeed preserves Sbest?", fSeed*Sbest*Transpose(fSeed) eq Sbest;
+
+///////////////////////////////////////////////////////////////////////////
+// Check B normal forms.
+///////////////////////////////////////////////////////////////////////////
+
+Blist := [];
+
+for i in [0..12] do
+    for j in [0..5] do
+        M := (A^i)*(fSeed^j);
+
+        isnew := true;
+        for N in Blist do
+            if M eq N then
+                isnew := false;
+                break;
+            end if;
+        end for;
+
+        if isnew then
+            Append(~Blist,M);
+        end if;
+    end for;
+end for;
+
+print "Number of distinct normal forms g^i f^j =", #Blist;
+
+print "";
+print "============================================================";
+print "PATCH FINAL STATUS";
+print "============================================================";
+
+if Determinant(fSeed) ne FF!0
+   and A*fSeed eq fSeed*(A^10)
+   and fSeed^6 eq I26
+   and fSeed^3 ne I26
+   and fSeed^2 ne I26
+   and TraceProfile3(fSeed) eq [1,-1,-2]
+   and fSeed*Sbest*Transpose(fSeed) eq Sbest
+   and #Blist eq 78 then
+
+    print "SUCCESS: genuine bilinear-form-preserving local 13:6 GL26 candidate found.";
+    print "Now test the F4 cubic invariant on fSeed.";
+else
+    print "NOT YET SUCCESSFUL.";
+    print "Use the printed failure point above:";
+    print "  - if Y24 failed: order-6 coset representative problem.";
+    print "  - if fSeed failed Sbest: block assembly/conversion problem.";
+    print "  - if Blist != 78: local 13:6 relation still not correct.";
+end if;
+
+print "============================================================";
