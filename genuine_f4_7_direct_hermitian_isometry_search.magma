@@ -1,0 +1,1276 @@
+///////////////////////////////////////////////////////////////////////////
+// FRESH MAGMA ONLINE SCRIPT
+// Genuine F4(7), direct E-Hermitian isometry, build fSeed, cubic test
+//
+// Purpose:
+//   Build genuine G=F4(7) on V26.
+//   Find genuine order-13 trace-zero g.
+//   Build V26 = 2 + 12 + 12 under g.
+//   Recover F4 bilinear form S and cubic invariant.
+//   Construct a bilinear-form-compatible fSeed satisfying:
+//        fSeed^-1 g fSeed = g^10,
+//        Order(fSeed)=6,
+//        TraceProfile(fSeed,fSeed^2,fSeed^3)=[1,-1,-2],
+//        |<g,fSeed>| = 78.
+//   Then test the F4 cubic.
+//   
+// This version avoids the broken diagonal Miso formula.
+// It constructs E-level isometries directly and then tests actual S24.
+///////////////////////////////////////////////////////////////////////////
+
+SetSeed(4);
+
+F := GF(7);
+n := 26;
+I26 := IdentityMatrix(F,n);
+
+Signed := function(x)
+    z := Integers()!x;
+    if z gt 3 then return z-7; else return z; end if;
+end function;
+
+TraceProfile3 := function(M)
+    return [ Signed(Trace(M)), Signed(Trace(M^2)), Signed(Trace(M^3)) ];
+end function;
+
+ExactOrder6 := function(M)
+    I := IdentityMatrix(BaseRing(M),Nrows(M));
+    return M^6 eq I and M^3 ne I and M^2 ne I;
+end function;
+
+Idx := function(i,j,n)
+    return (j-1)*n+i;
+end function;
+
+MatFromVecCol := function(v,n)
+    F0 := BaseRing(Parent(v));
+    return Matrix(F0,n,n,[ v[Idx(i,j,n)] : i in [1..n], j in [1..n] ]);
+end function;
+
+RowsToMat := function(rows,F0,n)
+    return Matrix(F0,#rows,n,&cat[ Eltseq(r) : r in rows ]);
+end function;
+
+print "============================================================";
+print "FRESH ALL-IN-ONE: F4(7), DIRECT HERM fSeed, CUBIC TEST";
+print "============================================================";
+
+///////////////////////////////////////////////////////////////////////////
+// 1. Genuine F4(7)
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 1: Build genuine F4(7)";
+
+G := ChevalleyGroup("F",4,F);
+gensG := [ G.i : i in [1..Ngens(G)] ];
+
+print "Degree =", Degree(G);
+print "BaseRing =", BaseRing(G);
+print "Order factorisation =", Factorisation(#G);
+
+///////////////////////////////////////////////////////////////////////////
+// 2. Find genuine order-13 trace-zero g
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 2: Find genuine order-13 trace-zero g";
+
+gFound := false;
+
+for trial in [1..600] do
+    x := Random(G);
+    ox := Order(x);
+
+    if ox mod 13 ne 0 then
+        continue;
+    end if;
+
+    cand := x^(ox div 13);
+
+    if Order(cand) eq 13 and Signed(Trace(Matrix(cand))) eq 0 then
+        g := cand;
+        gFound := true;
+        print "Found g at trial", trial;
+        print "Original random element order =", ox;
+        break;
+    end if;
+end for;
+
+if not gFound then
+    error "No good g found. Re-run with another SetSeed.";
+end if;
+
+A := Matrix(g);
+
+print "Order(g) =", Order(g);
+print "Trace(g) =", Signed(Trace(A));
+print "Trace(g^i), i=1..12 =", [ Signed(Trace(A^i)) : i in [1..12] ];
+
+///////////////////////////////////////////////////////////////////////////
+// 3. Recover F4 invariant bilinear form Sbest
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 3: Recover invariant bilinear form Sbest";
+
+eqS := [];
+
+for gen in gensG do
+    M := Matrix(gen);
+
+    for i in [1..n] do
+        for j in [1..n] do
+            row := [ F!0 : r in [1..n*n] ];
+
+            for a in [1..n] do
+                for b in [1..n] do
+                    row[Idx(a,b,n)] +:= M[i,a]*M[j,b];
+                end for;
+            end for;
+
+            row[Idx(i,j,n)] -:= F!1;
+            Append(~eqS,row);
+        end for;
+    end for;
+end for;
+
+KS := Nullspace(Transpose(Matrix(F,eqS)));
+
+print "Bilinear form space dimension =", Dimension(KS);
+
+Sbest := ZeroMatrix(F,n,n);
+
+for v in Basis(KS) do
+    Stry := MatFromVecCol(v,n);
+    if Rank(Stry) eq n then
+        Sbest := Stry;
+        break;
+    end if;
+end for;
+
+if Rank(Sbest) ne n then
+    error "No nonsingular Sbest found.";
+end if;
+
+print "Rank(Sbest) =", Rank(Sbest);
+print "G generators preserve Sbest?";
+for gen in gensG do
+    print Matrix(gen)*Sbest*Transpose(Matrix(gen)) eq Sbest;
+end for;
+
+print "g preserves Sbest?";
+print A*Sbest*Transpose(A) eq Sbest;
+
+///////////////////////////////////////////////////////////////////////////
+// 4. Adapted basis V26 = 2 + 12 + 12
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 4: Build adapted basis V26 = 2 + 12 + 12";
+
+V := VectorSpace(F,n);
+Fix := Nullspace(A-I26);
+Wnon := RowSpace(A-I26);
+
+print "dim Fix(g) =", Dimension(Fix);
+print "dim Wnon =", Dimension(Wnon);
+print "dim Fix+Wnon =", Dimension(sub<V | Basis(Fix) cat Basis(Wnon)>);
+
+if Dimension(Fix) ne 2 or Dimension(Wnon) ne 24 then
+    error "Wrong g-decomposition.";
+end if;
+
+fixRows := Basis(Fix);
+
+FindCyc12 := function(A,W,V,avoid)
+    for trial in [1..1200] do
+        v := Random(W);
+        cyc := [ v*(A^k) : k in [0..11] ];
+
+        if Dimension(sub<V | cyc>) ne 12 then
+            continue;
+        end if;
+
+        if Dimension(sub<V | avoid cat cyc>) eq #avoid+12 then
+            return true,cyc;
+        end if;
+    end for;
+
+    return false,[];
+end function;
+
+ok1,cyc1 := FindCyc12(A,Wnon,V,fixRows);
+if not ok1 then error "No first 12-block found."; end if;
+
+ok2,cyc2 := FindCyc12(A,Wnon,V,fixRows cat cyc1);
+if not ok2 then error "No second 12-block found."; end if;
+
+allRows := fixRows cat cyc1 cat cyc2;
+
+if Dimension(sub<V | allRows>) ne 26 then
+    error "Adapted rows do not form a basis.";
+end if;
+
+Tadapt := RowsToMat(allRows,F,n);
+Aadapt := Tadapt*A*Tadapt^-1;
+Sadapt := Tadapt*Sbest*Transpose(Tadapt);
+
+A12a := Submatrix(Aadapt,3,3,12,12);
+A12b := Submatrix(Aadapt,15,15,12,12);
+A24 := Submatrix(Aadapt,3,3,24,24);
+
+S00 := Submatrix(Sadapt,1,1,2,2);
+S24 := Submatrix(Sadapt,3,3,24,24);
+
+print "Fixed block identity?";
+print Submatrix(Aadapt,1,1,2,2) eq IdentityMatrix(F,2);
+
+print "A12a order =", Order(A12a);
+print "A12b order =", Order(A12b);
+print "A12a eq A12b?", A12a eq A12b;
+
+if A12a ne A12b then
+    error "This compact script assumes A12a=A12b. Re-run with another seed.";
+end if;
+
+///////////////////////////////////////////////////////////////////////////
+// 5. Build Sigma24, representing alpha -> alpha^10
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 5: Build Sigma24";
+
+R<x> := PolynomialRing(F);
+Phi13 := &+[ x^i : i in [0..12] ];
+
+PolyCoords := function(p)
+    q := p mod Phi13;
+    return [ Coefficient(q,i) : i in [0..11] ];
+end function;
+
+sigRows := [];
+for r in [0..11] do
+    Append(~sigRows,PolyCoords(x^(10*r)));
+end for;
+
+Sigma12 := Matrix(F,12,12,&cat sigRows);
+Sigma24 := DiagonalJoin(Sigma12,Sigma12);
+
+print "A12a*Sigma12 = Sigma12*A12a^10?";
+print A12a*Sigma12 eq Sigma12*(A12a^10);
+
+print "A24*Sigma24 = Sigma24*A24^10?";
+print A24*Sigma24 eq Sigma24*(A24^10);
+
+///////////////////////////////////////////////////////////////////////////
+// 6. Fixed 2D block F2
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 6: Find fixed 2x2 block F2";
+
+Felts := [ F!i : i in [0..6] ];
+GoodF2 := [];
+
+for a in Felts do 
+for b in Felts do 
+for c in Felts do 
+for d in Felts do
+    X := Matrix(F,2,2,[a,b,c,d]);
+
+    if Determinant(X) ne 0
+       and ExactOrder6(X)
+       and TraceProfile3(X) eq [1,-1,-2]
+       and X*S00*Transpose(X) eq S00 then
+        Append(~GoodF2,X);
+    end if;
+end for; 
+end for; 
+end for; 
+end for;
+
+print "Number of good F2 blocks =", #GoodF2;
+
+if #GoodF2 eq 0 then
+    error "No good F2 block found.";
+end if;
+
+F2 := GoodF2[1];
+
+print "Chosen F2:";
+print F2;
+print "TraceProfile F2 =", TraceProfile3(F2);
+
+///////////////////////////////////////////////////////////////////////////
+// 7. Build E=GF(7^12), recover E-level Hermitian form H
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 7: Recover E-level Hermitian form H";
+
+E<alpha> := ext<F | Phi13>;
+q0 := 7^6;
+
+Tau := function(z)
+    return z^q0;
+end function;
+
+Sig := function(z)
+    return z^(7^2);
+end function;
+
+TraceEF := function(z)
+    return F!Trace(z);
+end function;
+
+Ecoeffs := function(z)
+    s := Eltseq(z);
+    while #s lt 12 do 
+        Append(~s,F!0); 
+    end while;
+    return [ F!s[i] : i in [1..12] ];
+end function;
+
+BasisEVec := function(pos)
+    if pos le 12 then
+        return [ alpha^(pos-1), E!0 ];
+    else
+        return [ E!0, alpha^(pos-13) ];
+    end if;
+end function;
+
+Unknowns := [ <r,s,d> : r,s in [1..2], d in [0..11] ];
+numU := #Unknowns;
+eqH := [];
+
+for p in [1..24] do
+    xp := BasisEVec(p);
+
+    for q in [1..24] do
+        yq := BasisEVec(q);
+        row := [ F!0 : u in [1..numU] ];
+
+        for u in [1..numU] do
+            r := Unknowns[u][1];
+            s := Unknowns[u][2];
+            d := Unknowns[u][3];
+
+            row[u] := TraceEF(xp[r]*alpha^d*Tau(yq[s]));
+        end for;
+
+        Append(~eqH,row cat [ -S24[p,q] ]);
+    end for;
+end for;
+
+KH := Nullspace(Transpose(Matrix(F,eqH)));
+
+print "Augmented H nullspace dimension =", Dimension(KH);
+
+foundH := false;
+
+for v in Basis(KH) do
+    if v[numU+1] ne 0 then
+        solH := v/v[numU+1];
+        foundH := true;
+        break;
+    end if;
+end for;
+
+if not foundH then
+    error "No E-level H recovered.";
+end if;
+
+H := ZeroMatrix(E,2,2);
+
+for u in [1..numU] do
+    r := Unknowns[u][1];
+    s := Unknowns[u][2];
+    d := Unknowns[u][3];
+
+    H[r,s] +:= E!solH[u]*alpha^d;
+end for;
+
+print "H Hermitian?";
+print H[1,1] eq Tau(H[1,1]) and H[2,2] eq Tau(H[2,2]) and H[2,1] eq Tau(H[1,2]);
+
+print "det(H) nonzero?";
+print Determinant(H) ne 0;
+
+///////////////////////////////////////////////////////////////////////////
+// 8. Direct E-level Hermitian isometry search
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 8: Direct E-level Hermitian isometry search";
+
+TauMat := function(M)
+    return Matrix(E,Nrows(M),Ncols(M),
+        [ Tau(M[i,j]) : i in [1..Nrows(M)], j in [1..Ncols(M)] ]);
+end function;
+
+SigMat := function(M)
+    return Matrix(E,Nrows(M),Ncols(M),
+        [ Sig(M[i,j]) : i in [1..Nrows(M)], j in [1..Ncols(M)] ]);
+end function;
+
+TauTranspose := function(M)
+    return Transpose(TauMat(M));
+end function;
+
+Herm := function(v,w,Form)
+    return &+[ v[i]*Form[i,j]*Tau(w[j]) : i in [1..2], j in [1..2] ];
+end function;
+
+print "Building norm table";
+
+prim := PrimitiveElement(E);
+normGen := prim^(q0+1);
+
+NormExp := AssociativeArray();
+pow := E!1;
+
+for k in [0..q0-2] do
+    NormExp[pow] := k;
+    pow *:= normGen;
+end for;
+
+NormPreimage := function(c)
+    if c eq 0 then
+        return true,E!0;
+    end if;
+
+    if Tau(c) ne c then
+        return false,E!0;
+    end if;
+
+    if not IsDefined(NormExp,c) then
+        return false,E!0;
+    end if;
+
+    return true,prim^NormExp[c];
+end function;
+
+print "Norm table built";
+
+TryBuildM := function(Hs,Ht,maxRand)
+
+    targetA := Ht[1,1];
+    targetB := Ht[1,2];
+    targetC := Ht[2,2];
+
+    if targetA eq 0 then
+        return false,ZeroMatrix(E,2,2);
+    end if;
+
+    Vecs := [];
+    Append(~Vecs,[E!1,E!0]);
+    Append(~Vecs,[E!0,E!1]);
+
+    for r in [0..160] do
+        Append(~Vecs,[E!1,alpha^r]);
+        Append(~Vecs,[alpha^r,E!1]);
+    end for;
+
+    for r in [1..maxRand] do
+        Append(~Vecs,[Random(E),Random(E)]);
+    end for;
+
+    for v in Vecs do
+
+        nv := Herm(v,v,Hs);
+
+        if nv eq 0 then
+            continue;
+        end if;
+
+        ratio := targetA/nv;
+
+        okNorm,lam := NormPreimage(ratio);
+
+        if not okNorm then
+            continue;
+        end if;
+
+        v1 := [ lam*v[1], lam*v[2] ];
+
+        if Herm(v1,v1,Hs) ne targetA then
+            continue;
+        end if;
+
+        drow := [
+            &+[ v1[i]*Hs[i,j] : i in [1..2] ]
+            : j in [1..2]
+        ];
+
+        if drow[1] ne 0 then
+            q := [ Tau(-drow[2]/drow[1]), E!1 ];
+        elif drow[2] ne 0 then
+            q := [ E!1, Tau(-drow[1]/drow[2]) ];
+        else
+            continue;
+        end if;
+
+        if Herm(v1,q,Hs) ne 0 then
+            continue;
+        end if;
+
+        nq := Herm(q,q,Hs);
+
+        if nq eq 0 then
+            continue;
+        end if;
+
+        a := Tau(targetB/targetA);
+        w := [ a*v1[1], a*v1[2] ];
+
+        if Herm(v1,w,Hs) ne targetB then
+            continue;
+        end if;
+
+        need := (targetC - Herm(w,w,Hs))/nq;
+
+        okNeed,z := NormPreimage(need);
+
+        if not okNeed then
+            continue;
+        end if;
+
+        v2 := [ w[1] + z*q[1], w[2] + z*q[2] ];
+
+        M := Matrix(E,2,2,[ v1[1],v1[2],v2[1],v2[2] ]);
+
+        if Determinant(M) eq 0 then
+            continue;
+        end if;
+
+        if M*Hs*TauTranspose(M) eq Ht then
+            return true,M;
+        end if;
+
+    end for;
+
+    return false,ZeroMatrix(E,2,2);
+end function;
+
+Hsig := SigMat(H);
+
+Id2 := IdentityMatrix(E,2);
+Swap := Matrix(E,2,2,[E!0,E!1,E!1,E!0]);
+
+BaseList := [
+    <"id",Id2>,
+    <"swap",Swap>
+];
+
+FormPairs := [
+    <"SigH_to_H", Hsig, H>,
+    <"H_to_SigH", H, Hsig>,
+    <"H_to_H", H, H>,
+    <"SigH_to_SigH", Hsig, Hsig>
+];
+
+GoodMiso := [];
+GoodMisoTag := [];
+
+for fp in FormPairs do
+    ftag := fp[1];
+    Hs0 := fp[2];
+    Ht0 := fp[3];
+
+    for bsPair in BaseList do
+        stag := bsPair[1];
+        Bs := bsPair[2];
+
+        for btPair in BaseList do
+            ttag := btPair[1];
+            Bt := btPair[2];
+
+            Hs := Bs*Hs0*TauTranspose(Bs);
+            Ht := Bt*Ht0*TauTranspose(Bt);
+
+            print "Trying", ftag, "source", stag, "target", ttag;
+
+            okM,Mlocal := TryBuildM(Hs,Ht,1200);
+
+            print "  isometry found?", okM;
+
+            if okM then
+                Mfinal := Bt^-1*Mlocal*Bs;
+
+                if Mfinal*Hs0*TauTranspose(Mfinal) eq Ht0 then
+                    print "  final check true";
+                    Append(~GoodMiso,Mfinal);
+                    Append(~GoodMisoTag,ftag cat " / " cat stag cat "->" cat ttag);
+                else
+                    print "  final check false";
+                end if;
+            end if;
+
+        end for;
+    end for;
+end for;
+
+print "Number of good E-level Miso candidates =", #GoodMiso;
+
+///////////////////////////////////////////////////////////////////////////
+// 9. Convert E candidates to 24D and find Y24
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 9: Convert E candidates to 24D and find Y24";
+
+MultMat := function(c)
+    coeffs := Ecoeffs(c);
+    M := ZeroMatrix(F,12,12);
+
+    for k in [0..11] do
+        M +:= coeffs[k+1]*(A12a^k);
+    end for;
+
+    return M;
+end function;
+
+E2ToF24 := function(ME)
+    return BlockMatrix(2,2,[
+        MultMat(ME[1,1]), MultMat(ME[1,2]),
+        MultMat(ME[2,1]), MultMat(ME[2,2])
+    ]);
+end function;
+
+GoodF24 := [];
+GoodMode := [];
+
+for idx in [1..#GoodMiso] do
+    M0 := GoodMiso[idx];
+    tag0 := GoodMisoTag[idx];
+
+    ModeList := [
+        <tag0 cat " / M", M0>,
+        <tag0 cat " / M^-1", M0^-1>,
+        <tag0 cat " / SigM", SigMat(M0)>,
+        <tag0 cat " / SigM^-1", SigMat(M0)^-1>,
+        <tag0 cat " / TauM", TauMat(M0)>,
+        <tag0 cat " / TauM^-1", TauMat(M0)^-1>
+    ];
+
+    for item in ModeList do
+        tag := item[1];
+        B := E2ToF24(item[2]);
+
+        Cand := [
+            <tag cat " : Sigma24*B", Sigma24*B>,
+            <tag cat " : B*Sigma24", B*Sigma24>,
+            <tag cat " : Sigma24*B^-1", Sigma24*(B^-1)>,
+            <tag cat " : B^-1*Sigma24", (B^-1)*Sigma24>
+        ];
+
+        for pair in Cand do
+            ctag := pair[1];
+            Y := pair[2];
+
+            rel := A24*Y eq Y*(A24^10);
+            form := Y*S24*Transpose(Y) eq S24;
+            ord6 := ExactOrder6(Y);
+            trp := TraceProfile3(Y);
+
+            if rel and form and ord6 and trp eq [0,0,0] then
+                print "GOOD Y24 mode:";
+                print ctag;
+
+                Append(~GoodF24,Y);
+                Append(~GoodMode,ctag);
+            end if;
+        end for;
+    end for;
+end for;
+
+// Also test identity modes, useful diagnostic.
+Biden := E2ToF24(IdentityMatrix(E,2));
+IdCand := [
+    <"identity : Sigma24*B", Sigma24*Biden>,
+    <"identity : B*Sigma24", Biden*Sigma24>,
+    <"identity : Sigma24*B^-1", Sigma24*(Biden^-1)>,
+    <"identity : B^-1*Sigma24", (Biden^-1)*Sigma24>
+];
+
+for pair in IdCand do
+    ctag := pair[1];
+    Y := pair[2];
+
+    rel := A24*Y eq Y*(A24^10);
+    form := Y*S24*Transpose(Y) eq S24;
+    ord6 := ExactOrder6(Y);
+    trp := TraceProfile3(Y);
+
+    print ctag;
+    print "  rel =", rel, " form =", form, " ord6 =", ord6, " trp =", trp;
+
+    if rel and form and ord6 and trp eq [0,0,0] then
+        print "GOOD Y24 mode:";
+        print ctag;
+
+        Append(~GoodF24,Y);
+        Append(~GoodMode,ctag);
+    end if;
+end for;
+
+print "Number of good Y24 candidates =", #GoodF24;
+
+if #GoodF24 eq 0 then
+    error "No Y24 found. Send this output.";
+end if;
+
+Y24 := GoodF24[1];
+
+print "Chosen Y24 mode:";
+print GoodMode[1];
+
+///////////////////////////////////////////////////////////////////////////
+// 10. Build fSeed
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 10: Build fSeed";
+
+FseedAdapt := DiagonalJoin(F2,Y24);
+fSeed := Tadapt^-1*FseedAdapt*Tadapt;
+
+print "Relation fSeed^-1*g*fSeed = g^10?";
+print fSeed^-1*A*fSeed eq A^10;
+
+print "Exact order 6?";
+print ExactOrder6(fSeed);
+
+print "Trace profile [f,f^2,f^3]:";
+print TraceProfile3(fSeed);
+
+print "Preserves Sbest?";
+print fSeed*Sbest*Transpose(fSeed) eq Sbest;
+
+print "Normal form count #{g^i f^j}:";
+print #{ A^i*fSeed^j : i in [0..12], j in [0..5] };
+
+///////////////////////////////////////////////////////////////////////////
+// 11. Cubic invariant and test fSeed
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 11: Cubic invariant and fSeed test";
+
+Triples := [ <i,j,k> : i,j,k in [1..n] | i le j and j le k ];
+m := #Triples;
+
+print "Number of cubic monomials =", m;
+
+MonomialValues := function(v)
+    return [ v[t[1]]*v[t[2]]*v[t[3]] : t in Triples ];
+end function;
+
+CubicValue := function(v,coeffs)
+    vals := MonomialValues(v);
+    return &+[ coeffs[i]*vals[i] : i in [1..m] ];
+end function;
+
+RandomVector26 := function()
+    return Vector(F,[ Random(F) : i in [1..n] ]);
+end function;
+
+rowsC := [];
+numRowsPerGen := 1800;
+
+for gen in gensG do
+    M := Matrix(gen);
+    print "Adding cubic equations for one F4 generator...";
+
+    for r in [1..numRowsPerGen] do
+        v := RandomVector26();
+        vals1 := MonomialValues(v);
+        vals2 := MonomialValues(v*M);
+        Append(~rowsC,[ vals2[i]-vals1[i] : i in [1..m] ]);
+    end for;
+end for;
+
+KC := Nullspace(Transpose(Matrix(F,rowsC)));
+
+print "Cubic nullspace dimension =", Dimension(KC);
+
+if Dimension(KC) lt 1 then
+    error "No cubic invariant.";
+end if;
+
+cubicCoeff := Basis(KC)[1];
+
+RandomCubicTest := function(M,trials)
+    for r in [1..trials] do
+        v := RandomVector26();
+
+        if CubicValue(v*M,cubicCoeff) ne CubicValue(v,cubicCoeff) then
+            return false;
+        end if;
+    end for;
+
+    return true;
+end function;
+
+ExactCubicTest := function(M)
+    basis := [
+        Vector(F,[ i eq j select F!1 else F!0 : i in [1..n] ])
+        : j in [1..n]
+    ];
+
+    for i in [1..n] do
+        for j in [i..n] do
+            for k in [j..n] do
+                v := basis[i]+basis[j]+basis[k];
+
+                if CubicValue(v*M,cubicCoeff) ne CubicValue(v,cubicCoeff) then
+                    return false;
+                end if;
+            end for;
+        end for;
+    end for;
+
+    return true;
+end function;
+
+print "Random cubic check on genuine generators:";
+for gen in gensG do
+    print RandomCubicTest(Matrix(gen),100);
+end for;
+
+print "Random cubic check on fSeed:";
+seedRandom := RandomCubicTest(fSeed,100);
+print seedRandom;
+
+seedExact := false;
+
+if seedRandom then
+    print "Exact cubic check on fSeed:";
+    seedExact := ExactCubicTest(fSeed);
+    print seedExact;
+else
+    print "fSeed fails random cubic test.";
+end if;
+
+///////////////////////////////////////////////////////////////////////////
+// 12. Final report
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "============================================================";
+print "FINAL REPORT";
+print "============================================================";
+
+print "g genuine order 13 trace 0:";
+print Order(g) eq 13 and Signed(Trace(A)) eq 0;
+
+print "Number of good E-level Miso candidates:";
+print #GoodMiso;
+
+print "Number of good Y24 candidates:";
+print #GoodF24;
+
+print "fSeed relation:";
+print fSeed^-1*A*fSeed eq A^10;
+
+print "fSeed exact order 6:";
+print ExactOrder6(fSeed);
+
+print "fSeed trace profile:";
+print TraceProfile3(fSeed);
+
+print "fSeed preserves Sbest:";
+print fSeed*Sbest*Transpose(fSeed) eq Sbest;
+
+print "B normal form count:";
+print #{ A^i*fSeed^j : i in [0..12], j in [0..5] };
+
+print "Cubic random:";
+print seedRandom;
+
+print "Cubic exact:";
+print seedExact;
+
+if seedExact then
+    print "SUCCESS: fSeed preserves cubic. Set fHit=fSeed.";
+    fHit := fSeed;
+    print "NEXT STEP: Walton t-search with B=<g,fHit>.";
+else
+    print "No cubic-preserving f found here.";
+    print "If relation/order/form all work but cubic fails, this confirms:";
+    print "local 13:6 + bilinear form works, but cubic is the obstruction.";
+    print "Next step: full E-unitary twist search around fSeed.";
+end if;
+
+print "Saved variables:";
+print "G, g, A, Sbest, Tadapt, Aadapt, H, GoodMiso, Y24, fSeed, cubicCoeff";
+///////////////////////////////////////////////////////////////////////////
+// STEP 5U CONTINUATION:
+// Use actual source form Ssrc = Sigma24*S24*Transpose(Sigma24)
+// Then solve B*Ssrc*B^T = S24 at E-level.
+// This should target Y24 = B*Sigma24.
+//
+// Paste in SAME session after Step 5T output.
+///////////////////////////////////////////////////////////////////////////
+
+print "============================================================";
+print "STEP 5U: ACTUAL SOURCE-FORM ISOMETRY FOR Y24";
+print "============================================================";
+
+F := GF(7);
+n := 26;
+I26 := IdentityMatrix(F,26);
+
+Signed := function(x)
+    z := Integers()!x;
+    if z gt 3 then return z-7; else return z; end if;
+end function;
+
+TraceProfile3 := function(M)
+    return [ Signed(Trace(M)), Signed(Trace(M^2)), Signed(Trace(M^3)) ];
+end function;
+
+ExactOrder6 := function(M)
+    I := IdentityMatrix(BaseRing(M),Nrows(M));
+    return M^6 eq I and M^3 ne I and M^2 ne I;
+end function;
+
+q0 := 7^6;
+
+Tau := function(z)
+    return z^q0;
+end function;
+
+TauMat := function(M)
+    return Matrix(E,Nrows(M),Ncols(M),
+        [ Tau(M[i,j]) : i in [1..Nrows(M)], j in [1..Ncols(M)] ]);
+end function;
+
+TauTranspose := function(M)
+    return Transpose(TauMat(M));
+end function;
+
+TraceEF := function(z)
+    return F!Trace(z);
+end function;
+
+///////////////////////////////////////////////////////////////////////////
+// 1. Recover E-level Hermitian form from any 24D GF(7) form
+///////////////////////////////////////////////////////////////////////////
+
+RecoverEForm := function(Smat)
+
+    BasisEVec := function(pos)
+        if pos le 12 then
+            return [ alpha^(pos-1), E!0 ];
+        else
+            return [ E!0, alpha^(pos-13) ];
+        end if;
+    end function;
+
+    Unknowns := [ <r,s,d> : r,s in [1..2], d in [0..11] ];
+    numU := #Unknowns;
+    eqH := [];
+
+    for p in [1..24] do
+        xp := BasisEVec(p);
+
+        for q in [1..24] do
+            yq := BasisEVec(q);
+            row := [ F!0 : u in [1..numU] ];
+
+            for u in [1..numU] do
+                r := Unknowns[u][1];
+                s := Unknowns[u][2];
+                d := Unknowns[u][3];
+
+                row[u] := TraceEF(xp[r]*alpha^d*Tau(yq[s]));
+            end for;
+
+            Append(~eqH,row cat [ -Smat[p,q] ]);
+        end for;
+    end for;
+
+    KH := Nullspace(Transpose(Matrix(F,eqH)));
+
+    found := false;
+
+    for v in Basis(KH) do
+        if v[numU+1] ne 0 then
+            sol := v/v[numU+1];
+            found := true;
+            break;
+        end if;
+    end for;
+
+    if not found then
+        return false, ZeroMatrix(E,2,2);
+    end if;
+
+    Hrec := ZeroMatrix(E,2,2);
+
+    for u in [1..numU] do
+        r := Unknowns[u][1];
+        s := Unknowns[u][2];
+        d := Unknowns[u][3];
+
+        Hrec[r,s] +:= E!sol[u]*alpha^d;
+    end for;
+
+    return true,Hrec;
+
+end function;
+
+///////////////////////////////////////////////////////////////////////////
+// 2. Build actual source form after Sigma24
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 5U.1: Recover actual E-source form";
+
+Ssrc24 := Sigma24*S24*Transpose(Sigma24);
+
+okT,HtargetActual := RecoverEForm(S24);
+okS,HsourceActual := RecoverEForm(Ssrc24);
+
+print "Recovered target H?", okT;
+print "Recovered source H?", okS;
+
+if not okT or not okS then
+    error "Could not recover E-level source/target forms.";
+end if;
+
+print "Target Hermitian?";
+print HtargetActual[1,1] eq Tau(HtargetActual[1,1]) and
+      HtargetActual[2,2] eq Tau(HtargetActual[2,2]) and
+      HtargetActual[2,1] eq Tau(HtargetActual[1,2]);
+
+print "Source Hermitian?";
+print HsourceActual[1,1] eq Tau(HsourceActual[1,1]) and
+      HsourceActual[2,2] eq Tau(HsourceActual[2,2]) and
+      HsourceActual[2,1] eq Tau(HsourceActual[1,2]);
+
+print "det source nonzero?";
+print Determinant(HsourceActual) ne 0;
+
+print "det target nonzero?";
+print Determinant(HtargetActual) ne 0;
+
+///////////////////////////////////////////////////////////////////////////
+// 3. Norm table
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 5U.2: Build norm table";
+
+prim := PrimitiveElement(E);
+normGen := prim^(q0+1);
+
+NormExp := AssociativeArray();
+pow := E!1;
+
+for k in [0..q0-2] do
+    NormExp[pow] := k;
+    pow *:= normGen;
+end for;
+
+NormPreimage := function(c)
+
+    if c eq 0 then
+        return true,E!0;
+    end if;
+
+    if Tau(c) ne c then
+        return false,E!0;
+    end if;
+
+    if not IsDefined(NormExp,c) then
+        return false,E!0;
+    end if;
+
+    return true,prim^NormExp[c];
+
+end function;
+
+print "Norm table built.";
+
+///////////////////////////////////////////////////////////////////////////
+// 4. Direct Hermitian Gram-Schmidt isometry HsourceActual -> HtargetActual
+///////////////////////////////////////////////////////////////////////////
+
+Herm := function(v,w,Form)
+    return &+[ v[i]*Form[i,j]*Tau(w[j]) : i in [1..2], j in [1..2] ];
+end function;
+
+TryBuildM := function(Hs,Ht,maxRand)
+
+    targetA := Ht[1,1];
+    targetB := Ht[1,2];
+    targetC := Ht[2,2];
+
+    if targetA eq 0 then
+        return false,ZeroMatrix(E,2,2);
+    end if;
+
+    Vecs := [];
+    Append(~Vecs,[E!1,E!0]);
+    Append(~Vecs,[E!0,E!1]);
+
+    for r in [0..250] do
+        Append(~Vecs,[E!1,alpha^r]);
+        Append(~Vecs,[alpha^r,E!1]);
+    end for;
+
+    for r in [1..maxRand] do
+        Append(~Vecs,[Random(E),Random(E)]);
+    end for;
+
+    for v in Vecs do
+
+        nv := Herm(v,v,Hs);
+
+        if nv eq 0 then
+            continue;
+        end if;
+
+        okNorm,lam := NormPreimage(targetA/nv);
+
+        if not okNorm then
+            continue;
+        end if;
+
+        v1 := [ lam*v[1], lam*v[2] ];
+
+        if Herm(v1,v1,Hs) ne targetA then
+            continue;
+        end if;
+
+        drow := [
+            &+[ v1[i]*Hs[i,j] : i in [1..2] ]
+            : j in [1..2]
+        ];
+
+        if drow[1] ne 0 then
+            q := [ Tau(-drow[2]/drow[1]), E!1 ];
+        elif drow[2] ne 0 then
+            q := [ E!1, Tau(-drow[1]/drow[2]) ];
+        else
+            continue;
+        end if;
+
+        if Herm(v1,q,Hs) ne 0 then
+            continue;
+        end if;
+
+        nq := Herm(q,q,Hs);
+
+        if nq eq 0 then
+            continue;
+        end if;
+
+        a := Tau(targetB/targetA);
+        w := [ a*v1[1], a*v1[2] ];
+
+        if Herm(v1,w,Hs) ne targetB then
+            continue;
+        end if;
+
+        need := (targetC - Herm(w,w,Hs))/nq;
+
+        okNeed,z := NormPreimage(need);
+
+        if not okNeed then
+            continue;
+        end if;
+
+        v2 := [ w[1] + z*q[1], w[2] + z*q[2] ];
+
+        M := Matrix(E,2,2,[ v1[1],v1[2],v2[1],v2[2] ]);
+
+        if Determinant(M) eq 0 then
+            continue;
+        end if;
+
+        if M*Hs*TauTranspose(M) eq Ht then
+            return true,M;
+        end if;
+
+    end for;
+
+    return false,ZeroMatrix(E,2,2);
+
+end function;
+
+print "";
+print "STEP 5U.3: Search for B with B*HsourceActual*tau(B)^T = HtargetActual";
+
+Id2 := IdentityMatrix(E,2);
+Swap := Matrix(E,2,2,[E!0,E!1,E!1,E!0]);
+
+BaseList := [
+    <"id",Id2>,
+    <"swap",Swap>
+];
+
+GoodB := [];
+GoodBTag := [];
+
+for bsPair in BaseList do
+    stag := bsPair[1];
+    Bs := bsPair[2];
+
+    for btPair in BaseList do
+        ttag := btPair[1];
+        Bt := btPair[2];
+
+        Hs := Bs*HsourceActual*TauTranspose(Bs);
+        Ht := Bt*HtargetActual*TauTranspose(Bt);
+
+        print "Trying source", stag, "target", ttag;
+
+        okB,Bloc := TryBuildM(Hs,Ht,2500);
+
+        print "  isometry found?", okB;
+
+        if okB then
+            Bfinal := Bt^-1*Bloc*Bs;
+
+            test := Bfinal*HsourceActual*TauTranspose(Bfinal) eq HtargetActual;
+
+            print "  final check =", test;
+
+            if test then
+                Append(~GoodB,Bfinal);
+                Append(~GoodBTag,stag cat " -> " cat ttag);
+            end if;
+        end if;
+
+    end for;
+end for;
+
+print "Number of good B candidates =", #GoodB;
+
+if #GoodB eq 0 then
+    error "No B isometry found. Send output.";
+end if;
+
+///////////////////////////////////////////////////////////////////////////
+// 5. Convert B to 24D and test Y24
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 5U.4: Convert B to 24D and test Y24";
+
+Ecoeffs := function(z)
+    s := Eltseq(z);
+    while #s lt 12 do
+        Append(~s,F!0);
+    end while;
+    return [ F!s[i] : i in [1..12] ];
+end function;
+
+MultMat := function(c)
+    coeffs := Ecoffs(c);
+    return ZeroMatrix(F,12,12);
+end function;
