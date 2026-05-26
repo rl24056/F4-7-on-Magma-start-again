@@ -1,0 +1,403 @@
+print "============================================================";
+print "NOTES-LINE EXTENSION-AWARE TWISTED TORUS SEARCH";
+print "Fix: TwistedTori may live over extension field K.";
+print "We map using StandardRepresentation(Parent(torus element))";
+print "and only keep matrices descending to GF(7).";
+print "============================================================";
+
+SetSeed(16016);
+
+FF := GF(7);
+LG := GroupOfLieType("F4", FF);
+rhoBase := StandardRepresentation(LG);
+
+print "LG =", LG;
+print "Base representation codomain =", Codomain(rhoBase);
+
+// ============================================================
+// Helpers
+// ============================================================
+
+function SInt(x)
+    z := Integers()!x;
+    if z gt 3 then z -:= 7; end if;
+    return z;
+end function;
+
+function TraceProfile(M)
+    return [SInt(Trace(M)), SInt(Trace(M^2)), SInt(Trace(M^3))];
+end function;
+
+function ExactOrderMat(M,m)
+    I := IdentityMatrix(BaseRing(M),Nrows(M));
+    if M^m ne I then return false; end if;
+
+    for d in Divisors(m) do
+        if d lt m and M^d eq I then
+            return false;
+        end if;
+    end for;
+
+    return true;
+end function;
+
+function ActionExponent(A,F)
+    // convention: F^-1 A F = A^k
+    C := F^-1*A*F;
+    for k in [1..12] do
+        if C eq A^k then
+            return k;
+        end if;
+    end for;
+    return 0;
+end function;
+
+function NormalFormCount(A,F)
+    S := {};
+    for i in [0..12] do
+        for j in [0..5] do
+            Include(~S,A^i*F^j);
+        end for;
+    end for;
+    return #S;
+end function;
+
+function IsBaseElt(a,FF)
+    K := Parent(a);
+
+    for c in FF do
+        if K!c eq a then
+            return true,c;
+        end if;
+    end for;
+
+    return false,FF!0;
+end function;
+
+function IsBaseMatrix(M,FF)
+    for i in [1..Nrows(M)] do
+        for j in [1..Ncols(M)] do
+            ok,c := IsBaseElt(M[i,j],FF);
+            if not ok then
+                return false;
+            end if;
+        end for;
+    end for;
+
+    return true;
+end function;
+
+function CoerceBaseMatrix(M,FF)
+    entries := [];
+
+    for i in [1..Nrows(M)] do
+        for j in [1..Ncols(M)] do
+            ok,c := IsBaseElt(M[i,j],FF);
+            if not ok then
+                error "Matrix entry does not descend to GF(7).";
+            end if;
+            Append(~entries,c);
+        end for;
+    end for;
+
+    return Matrix(FF,Nrows(M),Ncols(M),entries);
+end function;
+
+function RandomTorusMatrix(torOrders,torMats)
+    K := BaseRing(torMats[1]);
+    n := Nrows(torMats[1]);
+    H := IdentityMatrix(K,n);
+
+    for i in [1..#torMats] do
+        H *:= torMats[i]^Random(0,torOrders[i]-1);
+    end for;
+
+    return H;
+end function;
+
+function RandomWeylMatrix(Wmats,maxLen)
+    K := BaseRing(Wmats[1]);
+    n := Nrows(Wmats[1]);
+    W := IdentityMatrix(K,n);
+    word := [];
+
+    len := Random(0,maxLen);
+
+    for k in [1..len] do
+        i := Random(1,#Wmats);
+        W *:= Wmats[i];
+        Append(~word,i);
+    end for;
+
+    return W,word;
+end function;
+
+// ============================================================
+// STEP 1: Build base Weyl representative matrices
+// ============================================================
+
+print "============================================================";
+print "STEP 1: Base Weyl representative matrices";
+print "============================================================";
+
+baseWmats := [];
+
+for i in [1..4] do
+    ni := elt<LG | i>;
+    Ni := Matrix(rhoBase(ni));
+    Append(~baseWmats,Ni);
+
+    print "n", i,
+          "order", Order(Ni),
+          "trace profile", TraceProfile(Ni);
+end for;
+
+// ============================================================
+// STEP 2: Twisted tori, extension-aware matrix conversion
+// ============================================================
+
+print "============================================================";
+print "STEP 2: TwistedTori(LG)";
+print "============================================================";
+
+TT := TwistedTori(LG);
+
+print "Number of twisted tori =", #TT;
+
+goodGCount := 0;
+baseGCount := 0;
+fFound := false;
+AFound := false;
+FFound := false;
+
+maxTrialsPerG := 3000;
+maxWeylLen := 16;
+
+for idx in [1..#TT] do
+    if Type(fFound) ne BoolElt then
+        continue;
+    end if;
+
+    Tdata := TT[idx];
+    torOrders := Tdata[1];
+    torGens := Tdata[2];
+
+    has13 := false;
+    for o in torOrders do
+        if o mod 13 eq 0 then
+            has13 := true;
+        end if;
+    end for;
+
+    if not has13 then
+        continue;
+    end if;
+
+    print "------------------------------------------------------------";
+    print "Torus index", idx, "orders =", torOrders;
+
+    Ptor := Parent(torGens[1]);
+
+    print "Parent of torus generators =", Ptor;
+
+    rhoTor := StandardRepresentation(Ptor);
+
+    torMats := [];
+
+    for j in [1..#torGens] do
+        Mj := Matrix(rhoTor(torGens[j]));
+        Append(~torMats,Mj);
+    end for;
+
+    K := BaseRing(torMats[1]);
+    print "Torus representation field =", K;
+    print "Torus matrix degree =", Nrows(torMats[1]);
+
+    // Lift base Weyl matrices to this extension field
+    Wmats := [ ChangeRing(W,K) : W in baseWmats ];
+
+    for j in [1..#torMats] do
+        if Type(fFound) ne BoolElt then
+            continue;
+        end if;
+
+        if torOrders[j] mod 13 ne 0 then
+            continue;
+        end if;
+
+        gExt := torMats[j]^(torOrders[j] div 13);
+
+        if Order(gExt) ne 13 then
+            continue;
+        end if;
+
+        goodGCount +:= 1;
+
+        trExt := Trace(gExt);
+
+        baseG := IsBaseMatrix(gExt,FF);
+
+        print "  g candidate from torus generator", j,
+              "Order =", Order(gExt),
+              "Trace =", trExt,
+              "descends to GF(7)?", baseG;
+
+        if not baseG then
+            continue;
+        end if;
+
+        A := CoerceBaseMatrix(gExt,FF);
+
+        if Trace(A) ne FF!0 then
+            print "  descended g has nonzero GF(7) trace, skipping.";
+            continue;
+        end if;
+
+        baseGCount +:= 1;
+
+        print "============================================================";
+        print "GOOD base-field g obtained from twisted torus";
+        print "torus index =", idx;
+        print "generator =", j;
+        print "Order(A) =", Order(A);
+        print "Trace(A) =", SInt(Trace(A));
+        print "Trace(A^i), i=1..12 =", [SInt(Trace(A^k)) : k in [1..12]];
+        print "============================================================";
+
+        // ========================================================
+        // STEP 3: Search h*w and w*h near this torus normaliser
+        // Only accept products descending to GF(7).
+        // ========================================================
+
+        print "Searching torus/Weyl products for genuine f...";
+
+        order6Count := 0;
+        baseProductCount := 0;
+        traceGoodCount := 0;
+        normalisingCount := 0;
+        profilesSeen := {};
+
+        for trial in [1..maxTrialsPerG] do
+            if Type(fFound) ne BoolElt then
+                continue;
+            end if;
+
+            H := RandomTorusMatrix(torOrders,torMats);
+            W,word := RandomWeylMatrix(Wmats,maxWeylLen);
+
+            candList := [
+                <H*W,"H*W",word>,
+                <W*H,"W*H",word>
+            ];
+
+            for cand in candList do
+                if Type(fFound) ne BoolElt then
+                    continue;
+                end if;
+
+                Yext := cand[1];
+                side := cand[2];
+                ww := cand[3];
+
+                if not IsBaseMatrix(Yext,FF) then
+                    continue;
+                end if;
+
+                baseProductCount +:= 1;
+
+                F := CoerceBaseMatrix(Yext,FF);
+
+                if not ExactOrderMat(F,6) then
+                    continue;
+                end if;
+
+                order6Count +:= 1;
+
+                prof := TraceProfile(F);
+                Include(~profilesSeen,<prof[1],prof[2],prof[3]>);
+
+                exp := ActionExponent(A,F);
+
+                if exp ne 0 then
+                    normalisingCount +:= 1;
+                end if;
+
+                if prof eq [1,-1,-2] then
+                    traceGoodCount +:= 1;
+
+                    print "------------------------------------------------------------";
+                    print "Trace-good order-6 f candidate";
+                    print "trial =", trial;
+                    print "side =", side;
+                    print "word =", ww;
+                    print "profile =", prof;
+                    print "action exponent =", exp;
+                    print "normal form count =", NormalFormCount(A,F);
+                    print "------------------------------------------------------------";
+                end if;
+
+                if prof eq [1,-1,-2] and exp eq 10 and NormalFormCount(A,F) eq 78 then
+                    fFound := true;
+                    AFound := A;
+                    FFound := F;
+
+                    print "============================================================";
+                    print "SUCCESS: genuine notes-line f found";
+                    print "torus index =", idx;
+                    print "trial =", trial;
+                    print "side =", side;
+                    print "word =", ww;
+                    print "Order(f) =", Order(F);
+                    print "Trace profile f =", TraceProfile(F);
+                    print "Action exponent =", ActionExponent(A,F);
+                    print "Normal form count =", NormalFormCount(A,F);
+                    print "============================================================";
+                end if;
+            end for;
+
+            if trial mod 500 eq 0 then
+                print "trial", trial,
+                      "base products", baseProductCount,
+                      "order6", order6Count,
+                      "traceGood", traceGoodCount,
+                      "normalising", normalisingCount;
+                print "profiles seen =", profilesSeen;
+            end if;
+        end for;
+
+        print "Finished search for this base g.";
+        print "base products =", baseProductCount;
+        print "order6 =", order6Count;
+        print "traceGood =", traceGoodCount;
+        print "normalising =", normalisingCount;
+        print "profiles seen =", profilesSeen;
+    end for;
+end for;
+
+// ============================================================
+// FINAL SUMMARY
+// ============================================================
+
+print "============================================================";
+print "FINAL SUMMARY";
+print "Order-13 extension g candidates seen =", goodGCount;
+print "Order-13 candidates descending to GF(7) with trace zero =", baseGCount;
+
+if Type(fFound) eq BoolElt then
+    print "RESULT: no genuine f found in this extension-aware torus/Weyl run.";
+    print "Important interpretation:";
+    print "  If baseGCount = 0, TwistedTori is giving extension torus representatives";
+    print "  that do not directly descend to the base V26 matrices.";
+    print "  Then Magma Online is not enough for this structural normaliser route.";
+    print "  Next notes-line step: HPC or ask Alastair for the exact torus/Weyl type.";
+else
+    print "RESULT: genuine f found.";
+    print "Order(g) =", Order(AFound);
+    print "Trace(g) =", SInt(Trace(AFound));
+    print "Order(f) =", Order(FFound);
+    print "Trace profile f =", TraceProfile(FFound);
+    print "Action exponent =", ActionExponent(AFound,FFound);
+    print "Normal form count |{g^i f^j}| =", NormalFormCount(AFound,FFound);
+    print "Next notes-line step: extract 12+14 spaces, then search t12 and t14.";
+end if;
+print "============================================================";
