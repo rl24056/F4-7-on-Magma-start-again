@@ -1,0 +1,1136 @@
+///////////////////////////////////////////////////////////////////////////
+// COMPACT ALL-IN-ONE MAGMA ONLINE SCRIPT
+// Genuine F4(7), structural Hermitian fSeed, robust diagonalisation
+///////////////////////////////////////////////////////////////////////////
+
+SetSeed(3);
+
+F := GF(7);
+n := 26;
+I26 := IdentityMatrix(F,26);
+
+Signed := function(x)
+    z := Integers()!x;
+    if z gt 3 then return z-7; else return z; end if;
+end function;
+
+TraceProfile3 := function(M)
+    return [ Signed(Trace(M)), Signed(Trace(M^2)), Signed(Trace(M^3)) ];
+end function;
+
+ExactOrder6 := function(M)
+    I := IdentityMatrix(BaseRing(M),Nrows(M));
+    return M^6 eq I and M^3 ne I and M^2 ne I;
+end function;
+
+Idx := function(i,j,n)
+    return (j-1)*n+i;
+end function;
+
+MatFromVecCol := function(v,n)
+    F0 := BaseRing(Parent(v));
+    return Matrix(F0,n,n,[ v[Idx(i,j,n)] : i in [1..n], j in [1..n] ]);
+end function;
+
+RowsToMat := function(rows,F0,n)
+    return Matrix(F0,#rows,n,&cat[ Eltseq(r) : r in rows ]);
+end function;
+
+print "============================================================";
+print "FRESH ALL-IN-ONE: F4(7), ROBUST HERM fSeed, CUBIC TEST";
+print "============================================================";
+
+///////////////////////////////////////////////////////////////////////////
+// 1. Genuine F4(7)
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 1: Build genuine F4(7)";
+
+G := ChevalleyGroup("F",4,F);
+gensG := [ G.i : i in [1..Ngens(G)] ];
+
+print "Degree =", Degree(G);
+print "BaseRing =", BaseRing(G);
+print "Order factorisation =", Factorisation(#G);
+
+///////////////////////////////////////////////////////////////////////////
+// 2. Find genuine order-13 trace-zero g
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 2: Find genuine order-13 trace-zero g";
+
+gFound := false;
+
+for trial in [1..500] do
+    x := Random(G);
+    ox := Order(x);
+
+    if ox mod 13 ne 0 then
+        continue;
+    end if;
+
+    cand := x^(ox div 13);
+
+    if Order(cand) eq 13 and Signed(Trace(Matrix(cand))) eq 0 then
+        g := cand;
+        gFound := true;
+        print "Found g at trial", trial;
+        print "Original order =", ox;
+        break;
+    end if;
+end for;
+
+if not gFound then
+    error "No good g found. Re-run with another SetSeed.";
+end if;
+
+A := Matrix(g);
+
+print "Order(g) =", Order(g);
+print "Trace(g) =", Signed(Trace(A));
+print "Trace(g^i), i=1..12 =", [ Signed(Trace(A^i)) : i in [1..12] ];
+
+///////////////////////////////////////////////////////////////////////////
+// 3. Invariant bilinear form Sbest
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 3: Recover invariant bilinear form";
+
+eqS := [];
+
+for gen in gensG do
+    M := Matrix(gen);
+
+    for i in [1..n] do
+        for j in [1..n] do
+            row := [ F!0 : r in [1..n*n] ];
+
+            for a in [1..n] do
+                for b in [1..n] do
+                    row[Idx(a,b,n)] +:= M[i,a]*M[j,b];
+                end for;
+            end for;
+
+            row[Idx(i,j,n)] -:= F!1;
+            Append(~eqS,row);
+        end for;
+    end for;
+end for;
+
+KS := Nullspace(Transpose(Matrix(F,eqS)));
+print "Bilinear form space dimension =", Dimension(KS);
+
+Sbest := ZeroMatrix(F,n,n);
+
+for v in Basis(KS) do
+    Stry := MatFromVecCol(v,n);
+    if Rank(Stry) eq n then
+        Sbest := Stry;
+        break;
+    end if;
+end for;
+
+if Rank(Sbest) ne n then
+    error "No nonsingular Sbest.";
+end if;
+
+print "Rank(Sbest) =", Rank(Sbest);
+print "G generators preserve Sbest?";
+for gen in gensG do
+    print Matrix(gen)*Sbest*Transpose(Matrix(gen)) eq Sbest;
+end for;
+print "g preserves Sbest?", A*Sbest*Transpose(A) eq Sbest;
+
+///////////////////////////////////////////////////////////////////////////
+// 4. Adapted basis V26 = 2 + 12 + 12
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 4: Adapted basis V26 = 2 + 12 + 12";
+
+V := VectorSpace(F,n);
+Fix := Nullspace(A-I26);
+Wnon := RowSpace(A-I26);
+
+print "dim Fix =", Dimension(Fix);
+print "dim Wnon =", Dimension(Wnon);
+print "dim Fix+Wnon =", Dimension(sub<V | Basis(Fix) cat Basis(Wnon)>);
+
+if Dimension(Fix) ne 2 or Dimension(Wnon) ne 24 then
+    error "Wrong g-decomposition.";
+end if;
+
+fixRows := Basis(Fix);
+
+FindCyc12 := function(A,W,V,avoid)
+    for trial in [1..1000] do
+        v := Random(W);
+        cyc := [ v*(A^k) : k in [0..11] ];
+
+        if Dimension(sub<V | cyc>) ne 12 then
+            continue;
+        end if;
+
+        if Dimension(sub<V | avoid cat cyc>) eq #avoid+12 then
+            return true,cyc;
+        end if;
+    end for;
+
+    return false,[];
+end function;
+
+ok1,cyc1 := FindCyc12(A,Wnon,V,fixRows);
+if not ok1 then error "No first 12-block."; end if;
+
+ok2,cyc2 := FindCyc12(A,Wnon,V,fixRows cat cyc1);
+if not ok2 then error "No second 12-block."; end if;
+
+allRows := fixRows cat cyc1 cat cyc2;
+
+if Dimension(sub<V | allRows>) ne 26 then
+    error "Adapted rows not basis.";
+end if;
+
+Tadapt := RowsToMat(allRows,F,n);
+Aadapt := Tadapt*A*Tadapt^-1;
+Sadapt := Tadapt*Sbest*Transpose(Tadapt);
+
+A12a := Submatrix(Aadapt,3,3,12,12);
+A12b := Submatrix(Aadapt,15,15,12,12);
+A24 := Submatrix(Aadapt,3,3,24,24);
+
+S00 := Submatrix(Sadapt,1,1,2,2);
+S24 := Submatrix(Sadapt,3,3,24,24);
+
+print "Fixed block identity?", Submatrix(Aadapt,1,1,2,2) eq IdentityMatrix(F,2);
+print "A12a order =", Order(A12a);
+print "A12b order =", Order(A12b);
+print "A12a eq A12b?", A12a eq A12b;
+
+if A12a ne A12b then
+    error "This compact script assumes A12a=A12b. Re-run with another seed.";
+end if;
+
+///////////////////////////////////////////////////////////////////////////
+// 5. Sigma: alpha -> alpha^10
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 5: Build Sigma24";
+
+R<x> := PolynomialRing(F);
+Phi13 := &+[ x^i : i in [0..12] ];
+
+PolyCoords := function(p)
+    q := p mod Phi13;
+    return [ Coefficient(q,i) : i in [0..11] ];
+end function;
+
+sigRows := [];
+for r in [0..11] do
+    Append(~sigRows,PolyCoords(x^(10*r)));
+end for;
+
+Sigma12 := Matrix(F,12,12,&cat sigRows);
+Sigma24 := DiagonalJoin(Sigma12,Sigma12);
+
+print "A12a*Sigma12 = Sigma12*A12a^10?", A12a*Sigma12 eq Sigma12*(A12a^10);
+print "A24*Sigma24 = Sigma24*A24^10?", A24*Sigma24 eq Sigma24*(A24^10);
+
+///////////////////////////////////////////////////////////////////////////
+// 6. Good fixed 2x2 block
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 6: Find fixed 2x2 block";
+
+Felts := [ F!i : i in [0..6] ];
+GoodF2 := [];
+
+for a in Felts do for b in Felts do for c in Felts do for d in Felts do
+    X := Matrix(F,2,2,[a,b,c,d]);
+
+    if Determinant(X) ne 0
+       and ExactOrder6(X)
+       and TraceProfile3(X) eq [1,-1,-2]
+       and X*S00*Transpose(X) eq S00 then
+        Append(~GoodF2,X);
+    end if;
+end for; end for; end for; end for;
+
+print "Number of good F2 blocks =", #GoodF2;
+
+if #GoodF2 eq 0 then
+    error "No F2 found.";
+end if;
+
+F2 := GoodF2[1];
+
+print "Chosen F2:";
+print F2;
+print "TraceProfile F2 =", TraceProfile3(F2);
+
+///////////////////////////////////////////////////////////////////////////
+// 7. E=GF(7^12), recover H from S24
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 7: Recover E-level Hermitian form H";
+
+E<alpha> := ext<F | Phi13>;
+q0 := 7^6;
+
+Tau := function(z)
+    return z^q0;
+end function;
+
+Sig := function(z)
+    return z^(7^2);
+end function;
+
+TraceEF := function(z)
+    return F!Trace(z);
+end function;
+
+Ecoeffs := function(z)
+    s := Eltseq(z);
+    while #s lt 12 do Append(~s,F!0); end while;
+    return [ F!s[i] : i in [1..12] ];
+end function;
+
+BasisEVec := function(pos)
+    if pos le 12 then
+        return [ alpha^(pos-1), E!0 ];
+    else
+        return [ E!0, alpha^(pos-13) ];
+    end if;
+end function;
+
+Unknowns := [ <r,s,d> : r,s in [1..2], d in [0..11] ];
+numU := #Unknowns;
+eqH := [];
+
+for p in [1..24] do
+    xp := BasisEVec(p);
+
+    for q in [1..24] do
+        yq := BasisEVec(q);
+        row := [ F!0 : u in [1..numU] ];
+
+        for u in [1..numU] do
+            r := Unknowns[u][1];
+            s := Unknowns[u][2];
+            d := Unknowns[u][3];
+            row[u] := TraceEF(xp[r]*alpha^d*Tau(yq[s]));
+        end for;
+
+        Append(~eqH,row cat [ -S24[p,q] ]);
+    end for;
+end for;
+
+KH := Nullspace(Transpose(Matrix(F,eqH)));
+print "Augmented H nullspace dimension =", Dimension(KH);
+
+foundH := false;
+
+for v in Basis(KH) do
+    if v[numU+1] ne 0 then
+        solH := v/v[numU+1];
+        foundH := true;
+        break;
+    end if;
+end for;
+
+if not foundH then
+    error "No H recovered.";
+end if;
+
+H := ZeroMatrix(E,2,2);
+
+for u in [1..numU] do
+    r := Unknowns[u][1];
+    s := Unknowns[u][2];
+    d := Unknowns[u][3];
+    H[r,s] +:= E!solH[u]*alpha^d;
+end for;
+
+print "H Hermitian?", H[1,1] eq Tau(H[1,1]) and H[2,2] eq Tau(H[2,2]) and H[2,1] eq Tau(H[1,2]);
+print "det(H) nonzero?", Determinant(H) ne 0;
+
+///////////////////////////////////////////////////////////////////////////
+// 8. Robust Hermitian diagonalisation
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 8: Robust Miso";
+
+TauMat := function(M)
+    return Matrix(E,Nrows(M),Ncols(M),
+        [ Tau(M[i,j]) : i in [1..Nrows(M)], j in [1..Ncols(M)] ]);
+end function;
+
+SigMat := function(M)
+    return Matrix(E,Nrows(M),Ncols(M),
+        [ Sig(M[i,j]) : i in [1..Nrows(M)], j in [1..Ncols(M)] ]);
+end function;
+
+TauTranspose := function(M)
+    return Transpose(TauMat(M));
+end function;
+
+IsDiagGood := function(D)
+    return D[1,2] eq 0 and D[2,1] eq 0 and D[1,1] ne 0 and D[2,2] ne 0
+           and Tau(D[1,1]) eq D[1,1] and Tau(D[2,2]) eq D[2,2];
+end function;
+
+FindDiag := function(Form)
+
+    Id2 := IdentityMatrix(E,2);
+    Swap := Matrix(E,2,2,[E!0,E!1,E!1,E!0]);
+
+    Bases := [ <"id",Id2>, <"swap",Swap> ];
+
+    for bb in Bases do
+
+        btag := bb[1];
+        B := bb[2];
+        Fm := B*Form*TauTranspose(B);
+
+        a := Fm[1,1];
+        b := Fm[1,2];
+        c := Fm[2,1];
+        d := Fm[2,2];
+
+        if a ne 0 then
+            Lams := [ -Tau(b/a), -c/a, -b/a, -Tau(c/a) ];
+
+            for lam in Lams do
+                P0 := Matrix(E,2,2,[E!1,E!0,lam,E!1]);
+                P := P0*B;
+                D := P*Form*TauTranspose(P);
+
+                if IsDiagGood(D) then
+                    return true,P,D,btag cat "_lower";
+                end if;
+            end for;
+        end if;
+
+        if d ne 0 then
+            Lams := [ -b/d, -Tau(c/d), -c/d, -Tau(b/d) ];
+
+            for lam in Lams do
+                P0 := Matrix(E,2,2,[E!1,lam,E!0,E!1]);
+                P := P0*B;
+                D := P*Form*TauTranspose(P);
+
+                if IsDiagGood(D) then
+                    return true,P,D,btag cat "_upper";
+                end if;
+            end for;
+        end if;
+
+    end for;
+
+    return false,Id2,Form,"fail";
+end function;
+
+Hsource := SigMat(H);
+Htarget := H;
+
+okS,Ps,Ds,tagS := FindDiag(Hsource);
+okT,Pt,Dt,tagT := FindDiag(Htarget);
+
+print "Source diagonalisation ok?", okS, " tag =", tagS;
+print "Target diagonalisation ok?", okT, " tag =", tagT;
+
+if not okS or not okT then
+    error "Robust diagonalisation failed. Send output.";
+end if;
+
+print "Ds diagonal good?", IsDiagGood(Ds);
+print "Dt diagonal good?", IsDiagGood(Dt);
+
+print "Building norm table...";
+
+prim := PrimitiveElement(E);
+normGen := prim^(q0+1);
+NormExp := AssociativeArray();
+pow := E!1;
+
+for k in [0..q0-2] do
+    NormExp[pow] := k;
+    pow *:= normGen;
+end for;
+
+NormPreimage := function(c)
+    if c eq 0 then return E!0; end if;
+    if Tau(c) ne c then error "Norm input not fixed."; end if;
+    if not IsDefined(NormExp,c) then error "Norm table missing input."; end if;
+    return prim^NormExp[c];
+end function;
+
+as := Ds[1,1];
+ds := Ds[2,2];
+at := Dt[1,1];
+dt := Dt[2,2];
+
+print "Diagonal entries tau-fixed?", Tau(as) eq as and Tau(ds) eq ds and Tau(at) eq at and Tau(dt) eq dt;
+
+r1 := NormPreimage(at/as);
+r2 := NormPreimage(dt/ds);
+
+Dscale := DiagonalMatrix(E,[r1,r2]);
+
+Q := Dscale*Ps;
+Miso := Pt^-1*Q;
+
+print "Check Miso*Hsource*tau(Miso)^T = Htarget:";
+print Miso*Hsource*TauTranspose(Miso) eq Htarget;
+print "det(Miso) nonzero?", Determinant(Miso) ne 0;
+
+///////////////////////////////////////////////////////////////////////////
+// 9. Convert E matrices to 24D, find good Y24
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 9: Convert to 24D and find Y24";
+
+MultMat := function(c)
+    coeffs := Ecoeffs(c);
+    M := ZeroMatrix(F,12,12);
+
+    for k in [0..11] do
+        M +:= coeffs[k+1]*(A12a^k);
+    end for;
+
+    return M;
+end function;
+
+E2ToF24 := function(ME)
+    return BlockMatrix(2,2,[
+        MultMat(ME[1,1]), MultMat(ME[1,2]),
+        MultMat(ME[2,1]), MultMat(ME[2,2])
+    ]);
+end function;
+
+ModeList := [
+    <"Miso", Miso>,
+    <"Miso^-1", Miso^-1>,
+    <"sigma(Miso)", SigMat(Miso)>,
+    <"sigma(Miso)^-1", SigMat(Miso)^-1>,
+    <"tau(Miso)", TauMat(Miso)>,
+    <"tau(Miso)^-1", TauMat(Miso)^-1>,
+    <"identity", IdentityMatrix(E,2)>
+];
+
+GoodF24 := [];
+GoodMode := [];
+
+for item in ModeList do
+    tag := item[1];
+    B := E2ToF24(item[2]);
+
+    Cand := [
+        <tag cat " : Sigma24*B", Sigma24*B>,
+        <tag cat " : B*Sigma24", B*Sigma24>,
+        <tag cat " : Sigma24*B^-1", Sigma24*(B^-1)>,
+        <tag cat " : B^-1*Sigma24", (B^-1)*Sigma24>
+    ];
+
+    for pair in Cand do
+        ctag := pair[1];
+        Y := pair[2];
+
+        rel := A24*Y eq Y*(A24^10);
+        form := Y*S24*Transpose(Y) eq S24;
+        ord6 := ExactOrder6(Y);
+        trp := TraceProfile3(Y);
+
+        if rel and form and ord6 and trp eq [0,0,0] then
+            print "GOOD Y24 mode:", ctag;
+            Append(~GoodF24,Y);
+            Append(~GoodMode,ctag);
+        end if;
+    end for;
+end for;
+
+print "Number of good Y24 candidates =", #GoodF24;
+
+if #GoodF24 eq 0 then
+    error "No Y24 found. Send output.";
+end if;
+
+Y24 := GoodF24[1];
+print "Chosen Y24 mode =", GoodMode[1];
+
+///////////////////////////////////////////////////////////////////////////
+// 10. Build fSeed
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 10: Build fSeed";
+
+FseedAdapt := DiagonalJoin(F2,Y24);
+fSeed := Tadapt^-1*FseedAdapt*Tadapt;
+
+print "Relation fSeed^-1*g*fSeed = g^10?";
+print fSeed^-1*A*fSeed eq A^10;
+
+print "Exact order 6?";
+print ExactOrder6(fSeed);
+
+print "Trace profile [f,f^2,f^3]:";
+print TraceProfile3(fSeed);
+
+print "Preserves Sbest?";
+print fSeed*Sbest*Transpose(fSeed) eq Sbest;
+
+print "Normal form count #{g^i f^j}:";
+print #{ A^i*fSeed^j : i in [0..12], j in [0..5] };
+
+///////////////////////////////////////////////////////////////////////////
+// 11. Cubic invariant and test fSeed
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 11: Cubic invariant";
+
+Triples := [ <i,j,k> : i,j,k in [1..n] | i le j and j le k ];
+m := #Triples;
+
+print "Number of cubic monomials =", m;
+
+MonomialValues := function(v)
+    return [ v[t[1]]*v[t[2]]*v[t[3]] : t in Triples ];
+end function;
+
+CubicValue := function(v,coeffs)
+    vals := MonomialValues(v);
+    return &+[ coeffs[i]*vals[i] : i in [1..m] ];
+end function;
+
+RandomVector26 := function()
+    return Vector(F,[ Random(F) : i in [1..n] ]);
+end function;
+
+rowsC := [];
+numRowsPerGen := 1800;
+
+for gen in gensG do
+    M := Matrix(gen);
+    print "Adding cubic equations for one F4 generator...";
+
+    for r in [1..numRowsPerGen] do
+        v := RandomVector26();
+        vals1 := MonomialValues(v);
+        vals2 := MonomialValues(v*M);
+        Append(~rowsC,[ vals2[i]-vals1[i] : i in [1..m] ]);
+    end for;
+end for;
+
+KC := Nullspace(Transpose(Matrix(F,rowsC)));
+
+print "Cubic nullspace dimension =", Dimension(KC);
+
+if Dimension(KC) lt 1 then
+    error "No cubic invariant.";
+end if;
+
+cubicCoeff := Basis(KC)[1];
+
+RandomCubicTest := function(M,trials)
+    for r in [1..trials] do
+        v := RandomVector26();
+        if CubicValue(v*M,cubicCoeff) ne CubicValue(v,cubicCoeff) then
+            return false;
+        end if;
+    end for;
+    return true;
+end function;
+
+ExactCubicTest := function(M)
+    basis := [
+        Vector(F,[ i eq j select F!1 else F!0 : i in [1..n] ])
+        : j in [1..n]
+    ];
+
+    for i in [1..n] do
+        for j in [i..n] do
+            for k in [j..n] do
+                v := basis[i]+basis[j]+basis[k];
+                if CubicValue(v*M,cubicCoeff) ne CubicValue(v,cubicCoeff) then
+                    return false;
+                end if;
+            end for;
+        end for;
+    end for;
+
+    return true;
+end function;
+
+print "Random cubic check on genuine generators:";
+for gen in gensG do
+    print RandomCubicTest(Matrix(gen),100);
+end for;
+
+print "Random cubic check on fSeed:";
+seedRandom := RandomCubicTest(fSeed,100);
+print seedRandom;
+
+seedExact := false;
+if seedRandom then
+    print "Exact cubic check on fSeed:";
+    seedExact := ExactCubicTest(fSeed);
+    print seedExact;
+end if;
+
+///////////////////////////////////////////////////////////////////////////
+// 12. Final report
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "============================================================";
+print "FINAL REPORT";
+print "============================================================";
+
+print "g genuine order 13 trace 0:";
+print Order(g) eq 13 and Signed(Trace(A)) eq 0;
+
+print "fSeed relation:";
+print fSeed^-1*A*fSeed eq A^10;
+
+print "fSeed exact order 6:";
+print ExactOrder6(fSeed);
+
+print "fSeed trace profile:";
+print TraceProfile3(fSeed);
+
+print "fSeed preserves Sbest:";
+print fSeed*Sbest*Transpose(fSeed) eq Sbest;
+
+print "B normal form count:";
+print #{ A^i*fSeed^j : i in [0..12], j in [0..5] };
+
+print "Cubic random:";
+print seedRandom;
+
+print "Cubic exact, only meaningful if random true:";
+print seedExact;
+
+if seedExact then
+    print "SUCCESS: fSeed preserves cubic. Use fSeed as fHit.";
+    fHit := fSeed;
+    print "NEXT STEP: Walton t-search with B=<g,fHit>.";
+else
+    print "No cubic-preserving f found here.";
+    print "If fSeed relation/order/form all work but cubic fails, this confirms:";
+    print "local 13:6 + bilinear form works, but cubic is still the obstruction.";
+    print "Next step: full E-unitary twist search preserving H.";
+end if;
+
+print "Saved variables:";
+print "G, g, A, Sbest, Tadapt, Aadapt, H, Miso, Y24, fSeed, cubicCoeff";
+///////////////////////////////////////////////////////////////////////////
+// STEP 5S CONTINUATION:
+// Fix Miso assembly convention, then build Y24 and fSeed.
+//
+// Paste in SAME session after your current output.
+// Required existing variables:
+//   F, E, Tau, Sig, H, Hsource, Htarget,
+//   Ps, Pt, Ds, Dt, TauTranspose, SigMat,
+//   A, A24, A12a, S24, Sbest, Sigma24,
+//   F2, Tadapt, G
+///////////////////////////////////////////////////////////////////////////
+
+print "============================================================";
+print "STEP 5S: FIX Miso ASSEMBLY CONVENTION";
+print "============================================================";
+
+F := GF(7);
+n := 26;
+I26 := IdentityMatrix(F,26);
+
+Signed := function(x)
+    z := Integers()!x;
+    if z gt 3 then return z-7; else return z; end if;
+end function;
+
+TraceProfile3 := function(M)
+    return [ Signed(Trace(M)), Signed(Trace(M^2)), Signed(Trace(M^3)) ];
+end function;
+
+ExactOrder6 := function(M)
+    I := IdentityMatrix(BaseRing(M),Nrows(M));
+    return M^6 eq I and M^3 ne I and M^2 ne I;
+end function;
+
+///////////////////////////////////////////////////////////////////////////
+// 1. Rebuild norm table and diagonal scale
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 5S.1: Rebuild norm table";
+
+q0 := 7^6;
+prim := PrimitiveElement(E);
+normGen := prim^(q0+1);
+
+NormExp := AssociativeArray();
+pow := E!1;
+
+for k in [0..q0-2] do
+    NormExp[pow] := k;
+    pow *:= normGen;
+end for;
+
+NormPreimage := function(c)
+    if c eq 0 then return E!0; end if;
+    if Tau(c) ne c then
+        error "Norm input not tau-fixed.";
+    end if;
+    if not IsDefined(NormExp,c) then
+        error "Norm table missing input.";
+    end if;
+    return prim^NormExp[c];
+end function;
+
+as := Ds[1,1];
+ds := Ds[2,2];
+at := Dt[1,1];
+dt := Dt[2,2];
+
+print "Diagonal entries tau-fixed?";
+print Tau(as) eq as and Tau(ds) eq ds and Tau(at) eq at and Tau(dt) eq dt;
+
+r1 := NormPreimage(at/as);
+r2 := NormPreimage(dt/ds);
+
+Dscale := DiagonalMatrix(E,[r1,r2]);
+DscaleInv := Dscale^-1;
+
+print "Check Dscale*Ds*tau(Dscale)^T = Dt:";
+print Dscale*Ds*TauTranspose(Dscale) eq Dt;
+
+print "Check DscaleInv*Ds*tau(DscaleInv)^T = Dt:";
+print DscaleInv*Ds*TauTranspose(DscaleInv) eq Dt;
+
+///////////////////////////////////////////////////////////////////////////
+// 2. Try many Miso conventions
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 5S.2: Try Miso assembly conventions";
+
+MisoCandidates := [
+    <"Pt^-1 * D * Ps", Pt^-1 * Dscale * Ps>,
+    <"Pt^-1 * D^-1 * Ps", Pt^-1 * DscaleInv * Ps>,
+    <"Pt^-1 * D * Ps^-1", Pt^-1 * Dscale * Ps^-1>,
+    <"Pt^-1 * D^-1 * Ps^-1", Pt^-1 * DscaleInv * Ps^-1>,
+
+    <"Pt * D * Ps", Pt * Dscale * Ps>,
+    <"Pt * D^-1 * Ps", Pt * DscaleInv * Ps>,
+    <"Pt * D * Ps^-1", Pt * Dscale * Ps^-1>,
+    <"Pt * D^-1 * Ps^-1", Pt * DscaleInv * Ps^-1>,
+
+    <"Pt^-1 * D * Ps with inverse final", (Pt^-1 * Dscale * Ps)^-1>,
+    <"Pt^-1 * D^-1 * Ps with inverse final", (Pt^-1 * DscaleInv * Ps)^-1>,
+    <"Pt^-1 * D * Ps^-1 with inverse final", (Pt^-1 * Dscale * Ps^-1)^-1>,
+    <"Pt^-1 * D^-1 * Ps^-1 with inverse final", (Pt^-1 * DscaleInv * Ps^-1)^-1>,
+
+    <"Ps^-1 * D * Pt", Ps^-1 * Dscale * Pt>,
+    <"Ps^-1 * D^-1 * Pt", Ps^-1 * DscaleInv * Pt>,
+    <"Ps * D * Pt^-1", Ps * Dscale * Pt^-1>,
+    <"Ps * D^-1 * Pt^-1", Ps * DscaleInv * Pt^-1>
+];
+
+GoodMiso := [];
+GoodMisoTag := [];
+
+for item in MisoCandidates do
+    tag := item[1];
+    M := item[2];
+
+    ok := M*Hsource*TauTranspose(M) eq Htarget;
+
+    print tag, " -> ", ok;
+
+    if ok then
+        Append(~GoodMiso,M);
+        Append(~GoodMisoTag,tag);
+    end if;
+end for;
+
+print "Number of good Miso conventions =", #GoodMiso;
+
+if #GoodMiso eq 0 then
+    error "No Miso convention worked. Send this output.";
+end if;
+
+Miso := GoodMiso[1];
+
+print "Chosen Miso convention:";
+print GoodMisoTag[1];
+
+print "Final Miso check:";
+print Miso*Hsource*TauTranspose(Miso) eq Htarget;
+
+///////////////////////////////////////////////////////////////////////////
+// 3. Convert E matrices to 24D and find Y24
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 5S.3: Convert Miso to 24D and find Y24";
+
+Ecoeffs := function(z)
+    s := Eltseq(z);
+    while #s lt 12 do Append(~s,F!0); end while;
+    return [ F!s[i] : i in [1..12] ];
+end function;
+
+MultMat := function(c)
+    coeffs := Ecoeffs(c);
+    M := ZeroMatrix(F,12,12);
+
+    for k in [0..11] do
+        M +:= coeffs[k+1]*(A12a^k);
+    end for;
+
+    return M;
+end function;
+
+E2ToF24 := function(ME)
+    return BlockMatrix(2,2,[
+        MultMat(ME[1,1]), MultMat(ME[1,2]),
+        MultMat(ME[2,1]), MultMat(ME[2,2])
+    ]);
+end function;
+
+ModeList := [
+    <"Miso", Miso>,
+    <"Miso^-1", Miso^-1>,
+    <"sigma(Miso)", SigMat(Miso)>,
+    <"sigma(Miso)^-1", SigMat(Miso)^-1>,
+    <"tau(Miso)", TauMat(Miso)>,
+    <"tau(Miso)^-1", TauMat(Miso)^-1>,
+    <"identity", IdentityMatrix(E,2)>
+];
+
+GoodF24 := [];
+GoodMode := [];
+
+for item in ModeList do
+    tag := item[1];
+    B := E2ToF24(item[2]);
+
+    Cand := [
+        <tag cat " : Sigma24*B", Sigma24*B>,
+        <tag cat " : B*Sigma24", B*Sigma24>,
+        <tag cat " : Sigma24*B^-1", Sigma24*(B^-1)>,
+        <tag cat " : B^-1*Sigma24", (B^-1)*Sigma24>
+    ];
+
+    for pair in Cand do
+        ctag := pair[1];
+        Y := pair[2];
+
+        rel := A24*Y eq Y*(A24^10);
+        form := Y*S24*Transpose(Y) eq S24;
+        ord6 := ExactOrder6(Y);
+        trp := TraceProfile3(Y);
+
+        print ctag;
+        print "  rel =", rel, " form =", form, " ord6 =", ord6, " trp =", trp;
+
+        if rel and form and ord6 and trp eq [0,0,0] then
+            print "  >>> GOOD Y24 FOUND";
+            Append(~GoodF24,Y);
+            Append(~GoodMode,ctag);
+        end if;
+    end for;
+end for;
+
+print "Number of good Y24 candidates =", #GoodF24;
+
+if #GoodF24 eq 0 then
+    error "No Y24 found. Send this output.";
+end if;
+
+Y24 := GoodF24[1];
+
+print "Chosen Y24 mode:";
+print GoodMode[1];
+
+///////////////////////////////////////////////////////////////////////////
+// 4. Build fSeed
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 5S.4: Build fSeed";
+
+FseedAdapt := DiagonalJoin(F2,Y24);
+fSeed := Tadapt^-1*FseedAdapt*Tadapt;
+
+print "Relation fSeed^-1*g*fSeed = g^10?";
+print fSeed^-1*A*fSeed eq A^10;
+
+print "Exact order 6?";
+print ExactOrder6(fSeed);
+
+print "Trace profile [f,f^2,f^3]:";
+print TraceProfile3(fSeed);
+
+print "Preserves Sbest?";
+print fSeed*Sbest*Transpose(fSeed) eq Sbest;
+
+print "Normal form count #{g^i f^j}:";
+print #{ A^i*fSeed^j : i in [0..12], j in [0..5] };
+
+///////////////////////////////////////////////////////////////////////////
+// 5. Cubic test, using existing cubicCoeff if available
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "STEP 5S.5: Cubic invariant test";
+
+Triples := [ <i,j,k> : i,j,k in [1..n] | i le j and j le k ];
+m := #Triples;
+
+MonomialValues := function(v)
+    return [ v[t[1]]*v[t[2]]*v[t[3]] : t in Triples ];
+end function;
+
+CubicValue := function(v,coeffs)
+    vals := MonomialValues(v);
+    return &+[ coeffs[i]*vals[i] : i in [1..m] ];
+end function;
+
+RandomVector26 := function()
+    return Vector(F,[ Random(F) : i in [1..n] ]);
+end function;
+
+if not assigned cubicCoeff then
+    print "cubicCoeff not assigned, rebuilding.";
+
+    gensG := [ G.i : i in [1..Ngens(G)] ];
+    rowsC := [];
+    numRowsPerGen := 1800;
+
+    for gen in gensG do
+        M := Matrix(gen);
+        print "Adding cubic equations for one F4 generator...";
+
+        for r in [1..numRowsPerGen] do
+            v := RandomVector26();
+            vals1 := MonomialValues(v);
+            vals2 := MonomialValues(v*M);
+            Append(~rowsC,[ vals2[i]-vals1[i] : i in [1..m] ]);
+        end for;
+    end for;
+
+    KC := Nullspace(Transpose(Matrix(F,rowsC)));
+
+    print "Cubic nullspace dimension =", Dimension(KC);
+
+    if Dimension(KC) lt 1 then
+        error "No cubic invariant.";
+    end if;
+
+    cubicCoeff := Basis(KC)[1];
+else
+    print "Using existing cubicCoeff.";
+end if;
+
+RandomCubicTest := function(M,trials)
+    for r in [1..trials] do
+        v := RandomVector26();
+        if CubicValue(v*M,cubicCoeff) ne CubicValue(v,cubicCoeff) then
+            return false;
+        end if;
+    end for;
+    return true;
+end function;
+
+ExactCubicTest := function(M)
+    basis := [
+        Vector(F,[ i eq j select F!1 else F!0 : i in [1..n] ])
+        : j in [1..n]
+    ];
+
+    for i in [1..n] do
+        for j in [i..n] do
+            for k in [j..n] do
+                v := basis[i]+basis[j]+basis[k];
+                if CubicValue(v*M,cubicCoeff) ne CubicValue(v,cubicCoeff) then
+                    return false;
+                end if;
+            end for;
+        end for;
+    end for;
+
+    return true;
+end function;
+
+print "Random cubic check on genuine generators:";
+for gen in [ G.i : i in [1..Ngens(G)] ] do
+    print RandomCubicTest(Matrix(gen),100);
+end for;
+
+print "Random cubic check on fSeed:";
+seedRandom := RandomCubicTest(fSeed,100);
+print seedRandom;
+
+seedExact := false;
+
+if seedRandom then
+    print "Exact cubic check on fSeed:";
+    seedExact := ExactCubicTest(fSeed);
+    print seedExact;
+else
+    print "fSeed fails random cubic test.";
+end if;
+
+///////////////////////////////////////////////////////////////////////////
+// 6. Final report
+///////////////////////////////////////////////////////////////////////////
+
+print "";
+print "============================================================";
+print "STEP 5S FINAL REPORT";
+print "============================================================";
+
+print "fSeed relation:";
+print fSeed^-1*A*fSeed eq A^10;
+
+print "fSeed exact order 6:";
+print ExactOrder6(fSeed);
+
+print "fSeed trace profile:";
+print TraceProfile3(fSeed);
+
+print "fSeed preserves Sbest:";
+print fSeed*Sbest*Transpose(fSeed) eq Sbest;
+
+print "B normal form count:";
+print #{ A^i*fSeed^j : i in [0..12], j in [0..5] };
+
+print "Cubic random:";
+print seedRandom;
+
+print "Cubic exact:";
+print seedExact;
+
+if seedExact then
+    print "SUCCESS: fSeed preserves cubic. Set fHit=fSeed.";
+    fHit := fSeed;
+    print "NEXT STEP: Walton t-search with B=<g,fHit>.";
+else
+    print "No cubic-preserving f yet.";
+    print "If relation/order/form all work but cubic fails, this confirms the known cubic obstruction.";
+    print "Next step: E-unitary twist search around fSeed.";
+end if;
+
+print "Saved variables:";
+print "Miso, Y24, fSeed, cubicCoeff";
